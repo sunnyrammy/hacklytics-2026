@@ -37,7 +37,7 @@ def _read_config(settings_obj: Any) -> DatabricksConfig:
         host=_get_setting(settings_obj, "DATABRICKS_HOST").rstrip("/"),
         token=_get_setting(settings_obj, "DATABRICKS_TOKEN"),
         endpoint=endpoint_name.strip(),
-        input_column=_get_setting(settings_obj, "DATABRICKS_INPUT_COLUMN", "comment_text") or "comment_text",
+        input_column=_get_setting(settings_obj, "DATABRICKS_INPUT_COLUMN", "text") or "text",
     )
 
 

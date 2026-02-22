@@ -2,6 +2,7 @@ import os
 import time
 from collections.abc import Sequence
 from typing import Any
+from urllib.parse import urlparse
 
 import requests
 
@@ -15,17 +16,62 @@ class DatabricksAPIError(Exception):
     pass
 
 
+def _read_env(*keys: str) -> str:
+    for key in keys:
+        value = os.getenv(key)
+        if value and value.strip():
+            return value.strip()
+    return ""
+
+
+def _extract_host_from_url(url: str) -> str:
+    parsed = urlparse(url)
+    if parsed.scheme in {"http", "https"} and parsed.netloc:
+        return f"{parsed.scheme}://{parsed.netloc}"
+    return ""
+
+
+def _extract_endpoint_name(endpoint: str) -> str:
+    if not endpoint:
+        return ""
+    parsed = urlparse(endpoint)
+    if parsed.scheme in {"http", "https"} and parsed.netloc:
+        path_parts = [part for part in parsed.path.split("/") if part]
+    else:
+        path_parts = [part for part in endpoint.split("/") if part]
+
+    if "serving-endpoints" in path_parts:
+        idx = path_parts.index("serving-endpoints")
+        if idx + 1 < len(path_parts):
+            return path_parts[idx + 1].strip()
+    return endpoint.strip().strip("/")
+
+
+def read_endpoint_config() -> tuple[str, str]:
+    raw_endpoint = _read_env(
+        "DATABRICKS_SERVING_ENDPOINT_NAME",
+        "DATABRICKS_ENDPOINT",
+        "databricks_endpoint",
+    )
+    endpoint_host = _extract_host_from_url(raw_endpoint) if raw_endpoint else ""
+    endpoint_name = _extract_endpoint_name(raw_endpoint) if raw_endpoint else ""
+    return endpoint_host, endpoint_name
+
+
 class DatabricksClient:
     CONNECT_TIMEOUT_S = 3
     READ_TIMEOUT_S = 30
     QUERY_RETRY_ATTEMPTS = 3
 
     def __init__(self) -> None:
-        self.host = (os.getenv("DATABRICKS_HOST") or "").rstrip("/")
-        self.token = os.getenv("DATABRICKS_TOKEN")
-        self.server_hostname = os.getenv("DATABRICKS_SERVER_HOSTNAME")
-        self.http_path = os.getenv("DATABRICKS_HTTP_PATH")
-        self.access_token = os.getenv("DATABRICKS_TOKEN")
+        endpoint_host, endpoint_name = read_endpoint_config()
+        explicit_host = _read_env("DATABRICKS_HOST", "databricks_host")
+        self.host = (explicit_host or endpoint_host).rstrip("/")
+        self.token = _read_env("DATABRICKS_TOKEN", "databricks_token")
+        self.server_hostname = _read_env("DATABRICKS_SERVER_HOSTNAME", "databricks_server_hostname")
+        self.http_path = _read_env("DATABRICKS_HTTP_PATH", "databricks_http_path")
+        self.access_token = self.token
+        self.default_endpoint_name = endpoint_name
 
         if not self.access_token:
             raise ValueError("Databricks configuration is incomplete.")
@@ -154,8 +200,15 @@ class DatabricksClient:
     def query_serving_endpoint(
         self, endpoint_name: str, payload: dict[str, Any]
     ) -> dict[str, Any]:
-        path = f"/serving-endpoints/{endpoint_name}/invocations"
-        url = self._build_url(path)
+        endpoint_value = (endpoint_name or "").strip() or self.default_endpoint_name
+        if not endpoint_value:
+            raise ValueError("Databricks serving endpoint is not configured.")
+
+        if endpoint_value.startswith("http://") or endpoint_value.startswith("https://"):
+            url = endpoint_value
+        else:
+            path = f"/serving-endpoints/{endpoint_value}/invocations"
+            url = self._build_url(path)
         last_error: Exception | None = None
 
         for attempt in range(self.QUERY_RETRY_ATTEMPTS):

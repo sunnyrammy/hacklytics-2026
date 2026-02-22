@@ -8,7 +8,7 @@ from typing import Any
 from asgiref.sync import sync_to_async
 from channels.generic.websocket import AsyncWebsocketConsumer
 
-from .databricks_client import DatabricksAPIError, DatabricksClient
+from .databricks_client import DatabricksAPIError, DatabricksClient, read_endpoint_config
 
 try:
     from vosk import KaldiRecognizer, Model
@@ -91,8 +91,8 @@ class FlagAudioConsumer(AsyncWebsocketConsumer):
         self.last_scored_text = ""
         self.score_every_seconds = float(os.getenv("SCORE_EVERY_SECONDS", "1.0"))
         self.toxicity_threshold = float(os.getenv("TOXICITY_THRESHOLD", "0.7"))
-        self.input_column = os.getenv("DATABRICKS_INPUT_COLUMN", "comment_text")
-        self.endpoint_name = os.getenv("DATABRICKS_SERVING_ENDPOINT_NAME")
+        self.input_column = os.getenv("DATABRICKS_INPUT_COLUMN", "text")
+        _, self.endpoint_name = read_endpoint_config()
 
         await self.accept()
         await self._send_json({
@@ -201,7 +201,7 @@ class FlagAudioConsumer(AsyncWebsocketConsumer):
             return
 
         if not self.endpoint_name:
-            await self._send_error("DATABRICKS_SERVING_ENDPOINT_NAME is not configured.")
+            await self._send_error("DATABRICKS endpoint is not configured.")
             return
 
         try:

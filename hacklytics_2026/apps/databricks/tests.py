@@ -180,7 +180,7 @@ class DatabricksViewsTests(TestCase):
         self.assertEqual(response.status_code, 500)
         self.assertEqual(
             response.json(),
-            {"error": "DATABRICKS_SERVING_ENDPOINT_NAME is not configured."},
+            {"error": "DATABRICKS endpoint is not configured."},
         )
 
 
