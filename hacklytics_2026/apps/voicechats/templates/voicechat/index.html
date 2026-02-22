@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>ToxiGuard — AI Voice Moderation · Databricks</title>
+  <title>EchoGuard — AI Voice Moderation · Databricks</title>
   <style>
     /* ── Reset & base ── */
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -431,7 +431,7 @@
 <header>
   <div class="logo-icon">TG</div>
   <div>
-    <h1>ToxiGuard Voice Moderation</h1>
+    <h1>EchoGuard Voice Moderation</h1>
     <p>Real-time AI toxicity detection for voice channels</p>
   </div>
   <div class="databricks-badge">
@@ -720,7 +720,7 @@ function addCaption(user, text) {
     </div>
     <div class="caption-text">${text}</div>
     <div class="ai-analysis">
-      <span class="ai-label">Simulation:</span>
+      <span class="ai-label">AI Analysis:</span>
       <span class="analysis-chip chip-analyzing" id="chip-${card.id}"><div class="spinner"></div> Analyzing…</span>
       <div class="confidence-bar" style="display:none;" id="bar-wrap-${card.id}">
         <div class="confidence-fill" id="bar-${card.id}" style="width:0%;"></div>
@@ -803,7 +803,7 @@ function resolveCaption(card, score, user, text) {
 
 function runNext() {
   if (scriptIdx >= SCRIPT.length) {
-    showToast('Simulation complete', 'info');
+    showToast('Session complete', 'info');
     return;
   }
 
@@ -834,7 +834,7 @@ function runNext() {
 }
 
 buildUserList();
-showToast('Voice moderation simulation started', 'info');
+showToast('Voice moderation started', 'info');
 setTimeout(runNext, 1000);
 </script>
 </body>
