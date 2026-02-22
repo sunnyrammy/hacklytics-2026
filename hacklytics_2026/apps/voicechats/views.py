@@ -10,7 +10,7 @@ from django.shortcuts import render
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_GET, require_http_methods
 
-from .databricks.client import call_databricks_inference, validate_databricks_endpoint
+from .flagging.classifier import classify_text, flag_terms_status
 from .stt.vosk_engine import accept_audio, create_recognizer, load_model
 
 LOGGER = logging.getLogger(__name__)
@@ -36,23 +36,18 @@ def _cleanup_streams() -> None:
 @require_GET
 def health(request: HttpRequest) -> JsonResponse:
     vosk_loaded = False
-    vosk_error = None
     try:
         load_model(str(getattr(settings, "VOSK_MODEL_PATH", "")))
         vosk_loaded = True
-    except Exception as exc:
-        vosk_error = str(exc)
+    except Exception:
+        vosk_loaded = False
 
-    databricks_ok, databricks_details = validate_databricks_endpoint(settings)
-    details = {
-        "vosk_error": vosk_error,
-        "databricks": databricks_details,
-    }
+    terms_status = flag_terms_status()
     return JsonResponse(
         {
             "vosk_model_loaded": vosk_loaded,
-            "databricks_reachable": databricks_ok,
-            "details": details,
+            "flag_terms_loaded": bool(terms_status.get("flag_terms_loaded")),
+            "flag_terms_count": int(terms_status.get("flag_terms_count", 0)),
         }
     )
 
@@ -104,17 +99,17 @@ def transcribe_chunk(request: HttpRequest) -> JsonResponse:
             if isinstance(segments, list):
                 segments.append(final)
             try:
-                response = call_databricks_inference(final, settings)
+                response = classify_text(final)
                 score_payload = {
                     "segment_id": segment_id,
                     "text": final,
+                    "transcript": response.get("transcript"),
                     "label": response.get("label"),
                     "score": response.get("score"),
+                    "score_0_1": response.get("score_0_1"),
                     "severity": response.get("severity"),
-                    "threshold_used": response.get("threshold_used"),
                     "flagged": bool(response.get("flagged")),
-                    "endpoint_id": response.get("endpoint_id"),
-                    "raw": response.get("raw"),
+                    "matches": response.get("matches", []),
                 }
             except Exception as exc:
                 score_payload = {"segment_id": segment_id, "error": str(exc), "text": final}

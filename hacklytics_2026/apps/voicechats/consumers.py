@@ -5,7 +5,7 @@ from asgiref.sync import sync_to_async
 from channels.generic.websocket import AsyncWebsocketConsumer
 from django.conf import settings
 
-from .databricks.client import call_databricks_inference
+from .flagging.classifier import classify_text
 from .stt.vosk_engine import accept_audio, create_recognizer, load_model
 
 LOGGER = logging.getLogger(__name__)
@@ -119,25 +119,23 @@ class VoiceChatStreamConsumer(AsyncWebsocketConsumer):
         if not finalized_text.strip():
             return
         try:
-            response = await sync_to_async(call_databricks_inference, thread_sensitive=False)(
-                finalized_text, settings
-            )
+            response = await sync_to_async(classify_text, thread_sensitive=False)(finalized_text)
             await self._send_json(
                 {
                     "type": "score",
                     "segment_id": segment_id,
                     "text": finalized_text,
+                    "transcript": response.get("transcript"),
                     "label": response.get("label"),
                     "score": response.get("score"),
+                    "score_0_1": response.get("score_0_1"),
                     "severity": response.get("severity"),
                     "flagged": bool(response.get("flagged")),
-                    "threshold_used": response.get("threshold_used"),
-                    "endpoint_id": response.get("endpoint_id"),
-                    "raw": response.get("raw"),
+                    "matches": response.get("matches", []),
                 }
             )
         except Exception as exc:
-            LOGGER.warning("Databricks scoring failed for finalized segment: %s", exc)
+            LOGGER.warning("Local scoring failed for finalized segment: %s", exc)
             await self._send_json(
                 {"type": "score_error", "error": str(exc), "text": finalized_text, "segment_id": segment_id}
             )

@@ -1,7 +1,6 @@
-from django.conf import settings
 from django.test import TestCase, override_settings
 
-from .databricks.client import normalize_databricks_output
+from .flagging.classifier import classify_text, flag_terms_status
 
 
 class VoiceChatApiTests(TestCase):
@@ -11,9 +10,8 @@ class VoiceChatApiTests(TestCase):
         self.assertEqual(response.status_code, 200)
         payload = response.json()
         self.assertIn("vosk_model_loaded", payload)
-        self.assertIn("databricks_reachable", payload)
-        self.assertIn("details", payload)
-        self.assertIn("databricks", payload["details"])
+        self.assertIn("flag_terms_loaded", payload)
+        self.assertIn("flag_terms_count", payload)
 
     def test_transcribe_requires_audio_body(self):
         response = self.client.post(
@@ -34,17 +32,31 @@ class VoiceChatApiTests(TestCase):
         self.assertIn("error", response.json())
 
 
-class DatabricksNormalizationTests(TestCase):
-    @override_settings(DATABRICKS_SCORE_TYPE="percent_0_100")
-    def test_percent_score_normalizes_to_zero_one(self):
-        payload = {"score": 82}
-        normalized = normalize_databricks_output(payload, settings_obj=settings, endpoint_id="ep")
-        self.assertAlmostEqual(normalized["score"], 0.82, places=3)
-        self.assertEqual(normalized["severity"], 82)
+class LocalFlaggingTests(TestCase):
+    def test_classifier_flags_known_term(self):
+        result = classify_text("You are useless trash.")
+        self.assertTrue(result["flagged"])
+        self.assertEqual(result["label"], "flag")
+        self.assertGreater(result["score_0_1"], 0.0)
+        self.assertGreater(len(result["matches"]), 0)
 
-    @override_settings(DATABRICKS_SCORE_TYPE="none", DATABRICKS_LABEL_FIELD="label", DATABRICKS_POSITIVE_CLASS="flag")
-    def test_unknown_score_uses_label_for_flag(self):
-        payload = {"label": "flag", "score": 9999}
-        normalized = normalize_databricks_output(payload, settings_obj=settings, endpoint_id="ep")
-        self.assertIsNone(normalized["score"])
-        self.assertTrue(normalized["flagged"])
+    def test_classifier_clean_text_is_ok(self):
+        result = classify_text("Team regroup and rotate left.")
+        self.assertFalse(result["flagged"])
+        self.assertEqual(result["label"], "ok")
+        self.assertEqual(result["score_0_1"], 0.0)
+        self.assertEqual(result["matches"], [])
+
+    def test_word_boundary_safe(self):
+        result = classify_text("This class is hard.")
+        self.assertFalse(any(match["term"] == "ass" for match in result["matches"]))
+
+    def test_multi_word_phrase_match(self):
+        result = classify_text("Please uninstall the game now.")
+        self.assertTrue(any(match["term"] == "uninstall the game" for match in result["matches"]))
+
+    def test_flag_terms_status(self):
+        status = flag_terms_status()
+        self.assertIn("flag_terms_loaded", status)
+        self.assertIn("flag_terms_count", status)
+        self.assertGreaterEqual(int(status["flag_terms_count"]), 1)
