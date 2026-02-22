@@ -21,5 +21,6 @@ from hacklytics_2026.apps.users.views import home
 urlpatterns = [
     path('admin/', admin.site.urls),
     path("databricks/", include("hacklytics_2026.apps.databricks.urls")),
+    path("api/", include("hacklytics_2026.apps.databricks.urls")),
     path("", home, name="home"),
 ]

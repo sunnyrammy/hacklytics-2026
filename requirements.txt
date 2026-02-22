@@ -1,4 +1,5 @@
 Django==6.0.2
 databricks-sql-connector
+requests
 # Optional for Arrow-based fetch optimizations:
 # databricks-sql-connector[pyarrow]

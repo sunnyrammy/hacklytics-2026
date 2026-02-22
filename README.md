@@ -15,9 +15,21 @@ pip install -r requirements.txt
 ## Configure Databricks environment variables (for Databricks endpoints)
 
 ```bash
+export DATABRICKS_HOST="https://dbc-xxxx.cloud.databricks.com"
 export DATABRICKS_SERVER_HOSTNAME="<your-server-hostname>"
 export DATABRICKS_HTTP_PATH="<your-http-path>"
 export DATABRICKS_TOKEN="<your-personal-access-token>"
+
+# Model Serving deployment/inference
+export DATABRICKS_SERVING_ENDPOINT_NAME="my-serving-endpoint"
+export DATABRICKS_MODEL_FULL_NAME="workspace.default.elasticnet_iris"
+export DATABRICKS_MODEL_VERSION="1"
+
+# Optional
+export DATABRICKS_SERVED_ENTITY_NAME="my-serving-endpoint-entity"
+export DATABRICKS_WORKLOAD_SIZE="Small"
+export DATABRICKS_SCALE_TO_ZERO="true"
+export DATABRICKS_INPUT_COLUMN="comment_text"
 ```
 
 Never commit tokens or secret values to git.
@@ -73,6 +85,30 @@ Delete product:
 
 ```bash
 curl -X DELETE http://127.0.0.1:8000/databricks/products/Widget/
+```
+
+## Model Serving deployment
+
+```bash
+python manage.py deploy_model_serving
+```
+
+## Model Serving inference proxy
+
+Text payload:
+
+```bash
+curl -X POST http://localhost:8000/api/ml/predict \
+  -H "Content-Type: application/json" \
+  -d '{"text":"hello"}'
+```
+
+Records payload:
+
+```bash
+curl -X POST http://localhost:8000/api/ml/predict \
+  -H "Content-Type: application/json" \
+  -d '{"records":[{"sepal length (cm)":5.1,"sepal width (cm)":3.5,"petal length (cm)":1.4,"petal width (cm)":0.2}]}'
 ```
 
 ## Databricks credential locations
