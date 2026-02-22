@@ -79,7 +79,7 @@ INSTALLED_APPS = [
     'django.contrib.staticfiles',
     'hacklytics_2026.apps.users',
     'hacklytics_2026.apps.databricks',
-    'voicechat',
+    'hacklytics_2026.apps.voicechats',
 ]
 
 if find_spec("channels"):
