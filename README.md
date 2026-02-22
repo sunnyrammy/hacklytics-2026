@@ -30,6 +30,9 @@ export DATABRICKS_SERVED_ENTITY_NAME="my-serving-endpoint-entity"
 export DATABRICKS_WORKLOAD_SIZE="Small"
 export DATABRICKS_SCALE_TO_ZERO="true"
 export DATABRICKS_INPUT_COLUMN="comment_text"
+export TOXICITY_THRESHOLD="0.7"
+export SCORE_EVERY_SECONDS="1.0"
+export VOSK_MODEL_PATH="models/vosk-model-small-en-us-0.15"
 ```
 
 Never commit tokens or secret values to git.
@@ -43,13 +46,41 @@ python manage.py migrate
 ## Start server
 
 ```bash
-python manage.py runserver
+daphne -b 0.0.0.0 -p 8000 hacklytics_2026.asgi:application
 ```
 
 ## Homepage
 
 Open:
 - http://127.0.0.1:8000/
+
+## WebSocket live audio setup (Redis + Channels)
+
+Start Redis (Docker):
+
+```bash
+docker run --rm -p 6379:6379 redis:7
+```
+
+Or use a local Redis server:
+
+```bash
+redis-server
+```
+
+Then run ASGI via Daphne:
+
+```bash
+daphne -b 0.0.0.0 -p 8000 hacklytics_2026.asgi:application
+```
+
+Open demo page:
+- http://127.0.0.1:8000/demo/live-audio
+
+WebSocket endpoint:
+- ws://127.0.0.1:8000/ws/flag-audio/ (use `wss://` in production)
+
+Note: WebSockets require ASGI (`daphne`); `manage.py runserver` is not required.
 
 ## Databricks CRUD examples
 

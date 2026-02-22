@@ -11,6 +11,7 @@ https://docs.djangoproject.com/en/6.0/ref/settings/
 """
 
 from pathlib import Path
+from importlib.util import find_spec
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -41,6 +42,9 @@ INSTALLED_APPS = [
     'hacklytics_2026.apps.databricks',
 ]
 
+if find_spec("channels"):
+    INSTALLED_APPS.append("channels")
+
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
@@ -52,6 +56,7 @@ MIDDLEWARE = [
 ]
 
 ROOT_URLCONF = 'hacklytics_2026.urls'
+ASGI_APPLICATION = "hacklytics_2026.asgi.application"
 
 TEMPLATES = [
     {
@@ -69,6 +74,16 @@ TEMPLATES = [
 ]
 
 WSGI_APPLICATION = 'hacklytics_2026.wsgi.application'
+
+if find_spec("channels_redis"):
+    CHANNEL_LAYERS = {
+        "default": {
+            "BACKEND": "channels_redis.core.RedisChannelLayer",
+            "CONFIG": {
+                "hosts": [("127.0.0.1", 6379)],
+            },
+        },
+    }
 
 
 # Database

@@ -1,5 +1,9 @@
 Django==6.0.2
 databricks-sql-connector
 requests
+channels
+channels-redis
+daphne
+vosk
 # Optional for Arrow-based fetch optimizations:
 # databricks-sql-connector[pyarrow]

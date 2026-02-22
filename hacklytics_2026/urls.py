@@ -17,10 +17,12 @@ Including another URLconf
 from django.contrib import admin
 from django.urls import include, path
 from hacklytics_2026.apps.users.views import home
+from hacklytics_2026.apps.databricks.views import live_audio_demo
 
 urlpatterns = [
     path('admin/', admin.site.urls),
     path("databricks/", include("hacklytics_2026.apps.databricks.urls")),
     path("api/", include("hacklytics_2026.apps.databricks.urls")),
+    path("demo/live-audio", live_audio_demo, name="live-audio-demo"),
     path("", home, name="home"),
 ]

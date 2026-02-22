@@ -146,3 +146,8 @@ def predict(request: HttpRequest) -> HttpResponse:
         return _json_error(f"Inference request failed: {exc}", 502)
     except Exception:
         return _json_error(GENERIC_ERROR_MESSAGE, 500)
+
+
+@require_http_methods(["GET"])
+def live_audio_demo(request: HttpRequest) -> HttpResponse:
+    return render(request, "databricks/live_audio_demo.html")

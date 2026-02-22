@@ -1,0 +1,33 @@
+{% load static %}
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Live Audio Flagging Demo</title>
+    <style>
+      body { font-family: Arial, sans-serif; margin: 2rem; }
+      .controls { margin-bottom: 1rem; display: flex; gap: 0.75rem; }
+      button { padding: 0.5rem 1rem; }
+      #log { white-space: pre-wrap; background: #f6f6f6; border: 1px solid #ddd; padding: 1rem; min-height: 18rem; }
+      .pill { display: inline-block; padding: 0.2rem 0.5rem; border-radius: 999px; font-size: 0.8rem; background: #e5e7eb; }
+      .pill.flagged { background: #fecaca; color: #991b1b; }
+      .pill.clean { background: #bbf7d0; color: #166534; }
+    </style>
+  </head>
+  <body>
+    <h1>Live Audio Flagging Demo</h1>
+    <p>Streams microphone audio to <code>/ws/flag-audio/</code> and receives transcript + Databricks toxicity scores.</p>
+    <p>Use <code>wss://</code> in production behind TLS.</p>
+
+    <div class="controls">
+      <button id="startBtn" type="button">Start</button>
+      <button id="stopBtn" type="button" disabled>Stop</button>
+      <span id="status" class="pill">Idle</span>
+    </div>
+
+    <div id="log"></div>
+
+    <script src="{% static 'databricks/live_audio_demo.js' %}"></script>
+  </body>
+</html>

@@ -49,6 +49,8 @@ class Command(BaseCommand):
                 self.stdout.write(self.style.WARNING(f"Endpoint '{endpoint_name}' already exists; checking status."))
             else:
                 raise CommandError(f"Failed to create endpoint '{endpoint_name}': {message}") from exc
+        except ValueError as exc:
+            raise CommandError(f"Invalid Databricks serving configuration: {exc}") from exc
 
         try:
             state = client.wait_endpoint_ready(endpoint_name=endpoint_name)
@@ -56,6 +58,8 @@ class Command(BaseCommand):
             raise CommandError(str(exc)) from exc
         except DatabricksAPIError as exc:
             raise CommandError(f"Failed while waiting for endpoint readiness: {exc}") from exc
+        except ValueError as exc:
+            raise CommandError(f"Invalid Databricks serving configuration: {exc}") from exc
 
         ready_state = (state.get("state") or {}).get("ready", "UNKNOWN")
         self.stdout.write(self.style.SUCCESS(f"Endpoint '{endpoint_name}' is READY ({ready_state})."))
