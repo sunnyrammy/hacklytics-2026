@@ -99,6 +99,13 @@ export VOSK_MODEL_PATH="/absolute/or/project-relative/path/to/vosk-model"
 export DATABRICKS_HOST="https://dbc-xxxx.cloud.databricks.com"
 export DATABRICKS_TOKEN="<token>"
 export DATABRICKS_ENDPOINT="<endpoint-name-or-/serving-endpoints/.../invocations>"
+# Output normalization contract (backend-only, frontend always receives 0.0-1.0 score)
+export DATABRICKS_SCORE_TYPE="probability_0_1"  # probability_0_1 | percent_0_100 | logit | none
+export DATABRICKS_SCORE_FIELD="score"           # optional field path, e.g. predictions.0.score
+export DATABRICKS_LABEL_FIELD="label"           # optional field path
+export DATABRICKS_POSITIVE_CLASS="flag"         # optional label used for flagging
+# Optional per-endpoint override map (JSON string):
+# export DATABRICKS_ENDPOINT_OUTPUT_SPECS='{"endpoint-a":{"score_type":"percent_0_100","score_field":"toxicity"}}'
 ```
 4. Run ASGI server:
 ```bash

@@ -586,6 +586,8 @@ let audioContext = null;
 let sourceNode = null;
 let processorNode = null;
 let activePartialEl = null;
+let httpSendInFlight = false;
+let fallbackQueuedChunk = null;
 
 const PB_STEPS = ['pb-audio','pb-asr','pb-embed','pb-infer','pb-classify','pb-enforce'];
 const PIPE_STEPS = ['pipe-input','pipe-asr','pipe-token','pipe-model','pipe-score','pipe-action'];
@@ -753,32 +755,41 @@ function clearPartial() {
   }
 }
 
-function resolveCaption(card, score, responsePayload, text) {
+function resolveCaption(card, analysis, text) {
   const chip = document.getElementById(`chip-${card.id}`);
   const barWrap = document.getElementById(`bar-wrap-${card.id}`);
   const bar = document.getElementById(`bar-${card.id}`);
+  const severity = typeof analysis.severity === 'number' ? analysis.severity : null;
+  const label = analysis.label || null;
+  const isFlagged = Boolean(analysis.flagged);
+  const endpointId = analysis.endpoint_id || '';
 
-  if (typeof score !== 'number') {
-    chip.className = 'analysis-chip chip-warning';
-    chip.textContent = 'Databricks unavailable';
-    return;
+  const isToxic = severity !== null ? severity >= 75 : isFlagged;
+  const isWarning = severity !== null ? severity >= 30 && severity < 75 : !isFlagged && !!label;
+
+  if (severity === null) {
+    chip.className = `analysis-chip ${isFlagged ? 'chip-toxic' : 'chip-warning'}`;
+    chip.textContent = isFlagged ? `🚨 ${label || 'Flagged'}` : `ℹ️ ${label || 'Label only'}`;
+  } else {
+    chip.className = `analysis-chip ${chipClass(severity)}`;
+    chip.textContent = `${isToxic ? '🚨' : isWarning ? '⚠️' : '✅'} ${scoreLabel(severity)} — ${severity.toFixed(1)}%`;
   }
 
-  const isToxic = score >= 75;
-  const isWarning = score >= 30 && score < 75;
+  if (endpointId) {
+    chip.title = `Endpoint: ${endpointId}`;
+  }
 
-  chip.className = `analysis-chip ${chipClass(score)}`;
-  chip.textContent = `${isToxic ? '🚨' : isWarning ? '⚠️' : '✅'} ${scoreLabel(score)} — ${score.toFixed(1)}%`;
-
-  barWrap.style.display = 'block';
-  setTimeout(() => {
-    bar.style.width = `${score}%`;
-    bar.style.background = scoreColor(score);
-  }, 40);
+  if (severity !== null) {
+    barWrap.style.display = 'block';
+    setTimeout(() => {
+      bar.style.width = `${severity}%`;
+      bar.style.background = scoreColor(severity);
+    }, 40);
+  }
 
   if (isToxic) {
     card.classList.add('toxic-card');
-    addToxicLog(ACTIVE_USER, text, score);
+    addToxicLog(ACTIVE_USER, text, severity ?? 100);
     showToast('Toxic content detected in final transcript', 'toxic');
   } else if (isWarning) {
     card.classList.add('warning-card');
@@ -793,7 +804,7 @@ function resolveCaption(card, score, responsePayload, text) {
   document.getElementById('stat-flagged').textContent = stats.flagged;
   document.getElementById('progress-fill').style.width = '100%';
   document.getElementById('progress-label').textContent = `${stats.analyzed} analyzed`;
-  updateScoreBar(score);
+  if (severity !== null) updateScoreBar(severity);
   animatePipeline(isToxic);
 }
 
@@ -832,20 +843,34 @@ function floatTo16BitPCM(float32Buffer) {
 }
 
 async function sendChunkHttp(pcmBuffer) {
+  if (httpSendInFlight) {
+    fallbackQueuedChunk = pcmBuffer;
+    return;
+  }
+  httpSendInFlight = true;
   if (!streamId) streamId = crypto.randomUUID();
-  const resp = await fetch(`/api/voicechat/transcribe/?stream_id=${encodeURIComponent(streamId)}&sample_rate=16000`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/octet-stream' },
-    body: pcmBuffer,
-  });
-  if (!resp.ok) return;
-  const data = await resp.json();
-  if (data.partial) updatePartial(data.partial);
-  if (data.final) {
-    clearPartial();
-    const card = addCaptionCard(ACTIVE_USER, data.final, false);
-    const score = data.score && typeof data.score.score === 'number' ? data.score.score * 100 : null;
-    resolveCaption(card, score, data.score, data.final);
+  try {
+    const resp = await fetch(`/api/voicechat/transcribe/?stream_id=${encodeURIComponent(streamId)}&sample_rate=16000`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/octet-stream' },
+      body: pcmBuffer,
+    });
+    if (!resp.ok) return;
+    const data = await resp.json();
+    if (data.partial) updatePartial(data.partial);
+    if (data.final) {
+      clearPartial();
+      const card = addCaptionCard(ACTIVE_USER, data.final, false);
+      card.dataset.segmentId = data.segment_id || '';
+      resolveCaption(card, data.score || {}, data.final);
+    }
+  } finally {
+    httpSendInFlight = false;
+    if (fallbackQueuedChunk) {
+      const queued = fallbackQueuedChunk;
+      fallbackQueuedChunk = null;
+      void sendChunkHttp(queued);
+    }
   }
 }
 
@@ -860,17 +885,14 @@ function handleServerEvent(data) {
     clearPartial();
     setSpeaking(ACTIVE_USER.id, false);
     const card = addCaptionCard(ACTIVE_USER, data.text || '', false);
-    card.dataset.segmentText = data.text || '';
+    card.dataset.segmentId = data.segment_id || '';
     return;
   }
 
   if (data.type === 'score') {
     const allCards = [...document.querySelectorAll('.caption-card')].reverse();
-    const target = allCards.find((c) => c.dataset.segmentText === data.text);
-    const normalizedScore = typeof data.score === 'number'
-      ? (data.score <= 1 ? data.score * 100 : data.score)
-      : null;
-    if (target) resolveCaption(target, normalizedScore, data.response, data.text || '');
+    const target = allCards.find((c) => c.dataset.segmentId === (data.segment_id || ''));
+    if (target) resolveCaption(target, data, data.text || '');
     return;
   }
 
@@ -928,7 +950,7 @@ async function startStreaming() {
     }
   };
 
-  processorNode.onaudioprocess = async (event) => {
+  processorNode.onaudioprocess = (event) => {
     const channelData = event.inputBuffer.getChannelData(0);
     const downsampled = downsampleBuffer(channelData, audioContext.sampleRate, 16000);
     const pcm16 = floatTo16BitPCM(downsampled);
@@ -940,7 +962,7 @@ async function startStreaming() {
     }
 
     if (useHttpFallback) {
-      await sendChunkHttp(buffer);
+      void sendChunkHttp(buffer);
     }
   };
 

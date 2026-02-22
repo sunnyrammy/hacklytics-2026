@@ -1,6 +1,5 @@
 import json
 import logging
-from typing import Any
 
 from asgiref.sync import sync_to_async
 from channels.generic.websocket import AsyncWebsocketConsumer
@@ -12,32 +11,12 @@ from .stt.vosk_engine import accept_audio, create_recognizer, load_model
 LOGGER = logging.getLogger(__name__)
 
 
-def _extract_numeric_score(payload: Any) -> float | None:
-    if isinstance(payload, (int, float)):
-        return float(payload)
-    if isinstance(payload, dict):
-        for key in ("toxicity", "score", "probability", "toxic", "prediction"):
-            value = payload.get(key)
-            if isinstance(value, (int, float)):
-                return float(value)
-        for value in payload.values():
-            score = _extract_numeric_score(value)
-            if score is not None:
-                return score
-    if isinstance(payload, list):
-        for item in payload:
-            score = _extract_numeric_score(item)
-            if score is not None:
-                return score
-    return None
-
-
 class VoiceChatStreamConsumer(AsyncWebsocketConsumer):
     async def connect(self):
         self.recognizer = None
         self.sample_rate = 16000
         self.final_segments: list[str] = []
-        self.toxicity_threshold = float(getattr(settings, "TOXICITY_THRESHOLD", 0.7))
+        self.segment_counter = 0
         await self.accept()
         await self._send_json(
             {
@@ -66,7 +45,11 @@ class VoiceChatStreamConsumer(AsyncWebsocketConsumer):
 
         message_type = payload.get("type")
         if message_type == "start":
-            sample_rate = int(payload.get("sample_rate", 16000))
+            try:
+                sample_rate = int(payload.get("sample_rate", 16000))
+            except (TypeError, ValueError):
+                await self._send_error("sample_rate must be a positive integer.")
+                return
             await self._start_stream(sample_rate)
             return
         if message_type == "stop":
@@ -80,6 +63,7 @@ class VoiceChatStreamConsumer(AsyncWebsocketConsumer):
             model = await sync_to_async(load_model, thread_sensitive=True)(model_path)
             self.recognizer = await sync_to_async(create_recognizer, thread_sensitive=True)(model, sample_rate)
             self.final_segments = []
+            self.segment_counter = 0
             self.sample_rate = sample_rate
             await self._send_json({"type": "started", "sample_rate": sample_rate})
         except Exception as exc:
@@ -102,9 +86,11 @@ class VoiceChatStreamConsumer(AsyncWebsocketConsumer):
         if partial_text:
             await self._send_json({"type": "partial", "text": partial_text})
         if final_text:
+            self.segment_counter += 1
+            segment_id = str(self.segment_counter)
             self.final_segments.append(final_text)
-            await self._send_json({"type": "segment", "text": final_text})
-            await self._score_and_send(final_text)
+            await self._send_json({"type": "segment", "segment_id": segment_id, "text": final_text})
+            await self._score_and_send(final_text, segment_id)
 
     async def _stop_stream(self):
         if self.recognizer is None:
@@ -116,9 +102,11 @@ class VoiceChatStreamConsumer(AsyncWebsocketConsumer):
             parsed = json.loads(final_payload)
             final_text = (parsed.get("text") or "").strip()
             if final_text:
+                self.segment_counter += 1
+                segment_id = str(self.segment_counter)
                 self.final_segments.append(final_text)
-                await self._send_json({"type": "segment", "text": final_text})
-                await self._score_and_send(final_text)
+                await self._send_json({"type": "segment", "segment_id": segment_id, "text": final_text})
+                await self._score_and_send(final_text, segment_id)
             transcript = " ".join(self.final_segments).strip()
             await self._send_json({"type": "final", "transcript": transcript})
         except Exception as exc:
@@ -127,33 +115,37 @@ class VoiceChatStreamConsumer(AsyncWebsocketConsumer):
         finally:
             await self.close()
 
-    async def _score_and_send(self, finalized_text: str):
+    async def _score_and_send(self, finalized_text: str, segment_id: str):
         if not finalized_text.strip():
             return
         try:
             response = await sync_to_async(call_databricks_inference, thread_sensitive=False)(
                 finalized_text, settings
             )
-            score = _extract_numeric_score(response)
-            flagged = bool(score is not None and score >= self.toxicity_threshold)
             await self._send_json(
                 {
                     "type": "score",
+                    "segment_id": segment_id,
                     "text": finalized_text,
-                    "score": score,
-                    "flagged": flagged,
-                    "threshold": self.toxicity_threshold,
-                    "response": response,
+                    "label": response.get("label"),
+                    "score": response.get("score"),
+                    "severity": response.get("severity"),
+                    "flagged": bool(response.get("flagged")),
+                    "threshold_used": response.get("threshold_used"),
+                    "endpoint_id": response.get("endpoint_id"),
+                    "raw": response.get("raw"),
                 }
             )
         except Exception as exc:
             LOGGER.warning("Databricks scoring failed for finalized segment: %s", exc)
-            await self._send_json({"type": "score_error", "error": str(exc), "text": finalized_text})
+            await self._send_json(
+                {"type": "score_error", "error": str(exc), "text": finalized_text, "segment_id": segment_id}
+            )
 
     async def _send_error(self, message: str, close: bool = False):
         await self._send_json({"type": "error", "error": message})
         if close:
             await self.close()
 
-    async def _send_json(self, payload: dict[str, Any]):
+    async def _send_json(self, payload: dict[str, object]):
         await self.send(text_data=json.dumps(payload))
