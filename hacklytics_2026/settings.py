@@ -172,3 +172,17 @@ USE_TZ = True
 # https://docs.djangoproject.com/en/6.0/howto/static-files/
 
 STATIC_URL = 'static/'
+
+# Voicechat / model-serving settings
+VOSK_MODEL_PATH = os.getenv(
+    "VOSK_MODEL_PATH",
+    str(BASE_DIR / "models" / "vosk-model-small-en-us-0.15"),
+)
+DATABRICKS_HOST = os.getenv("DATABRICKS_HOST", "").rstrip("/")
+DATABRICKS_TOKEN = os.getenv("DATABRICKS_TOKEN", "")
+DATABRICKS_ENDPOINT = os.getenv(
+    "DATABRICKS_ENDPOINT",
+    os.getenv("DATABRICKS_SERVING_ENDPOINT_NAME", ""),
+)
+DATABRICKS_INPUT_COLUMN = os.getenv("DATABRICKS_INPUT_COLUMN", "comment_text")
+TOXICITY_THRESHOLD = float(os.getenv("TOXICITY_THRESHOLD", "0.7"))

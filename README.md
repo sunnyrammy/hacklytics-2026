@@ -33,6 +33,7 @@ export DATABRICKS_INPUT_COLUMN="comment_text"
 export TOXICITY_THRESHOLD="0.7"
 export SCORE_EVERY_SECONDS="1.0"
 export VOSK_MODEL_PATH="models/vosk-model-small-en-us-0.15"
+export DATABRICKS_ENDPOINT="my-serving-endpoint" # optional alias for serving endpoint
 ```
 
 Never commit tokens or secret values to git.
@@ -79,8 +80,41 @@ Open demo page:
 
 WebSocket endpoint:
 - ws://127.0.0.1:8000/ws/flag-audio/ (use `wss://` in production)
+- ws://127.0.0.1:8000/ws/voicechat/stream/ (voicechat live transcription)
 
 Note: WebSockets require ASGI (`daphne`); `manage.py runserver` is not required.
+
+## Voicechat live transcription
+
+1. Install dependencies:
+```bash
+pip install -r requirements.txt
+```
+2. Place a Vosk model folder locally and set:
+```bash
+export VOSK_MODEL_PATH="/absolute/or/project-relative/path/to/vosk-model"
+```
+3. Configure Databricks variables:
+```bash
+export DATABRICKS_HOST="https://dbc-xxxx.cloud.databricks.com"
+export DATABRICKS_TOKEN="<token>"
+export DATABRICKS_ENDPOINT="<endpoint-name-or-/serving-endpoints/.../invocations>"
+```
+4. Run ASGI server:
+```bash
+daphne -b 0.0.0.0 -p 8000 hacklytics_2026.asgi:application
+```
+5. Open:
+```text
+http://127.0.0.1:8000/voicechat/
+```
+
+### Quick verification checklist
+
+- `GET /api/voicechat/health/` returns `"vosk_model_loaded": true` when `VOSK_MODEL_PATH` is valid.
+- `GET /api/voicechat/health/` returns `"databricks_reachable": true` when Databricks host/token/endpoint are valid.
+- Speaking into the mic shows live partial transcript updates in `/voicechat/`.
+- Finalized transcript segments emit Databricks score results (or `score_error` details if unreachable).
 
 ## Databricks CRUD examples
 
