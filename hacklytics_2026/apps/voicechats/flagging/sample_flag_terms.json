@@ -1,0 +1,5 @@
+[
+  { "term": "TERM", "category": "toxic", "severity": 2, "type": "word" },
+  { "term": "TERM_PLACEHOLDER_1", "category": "insult", "severity": 3, "type": "word" },
+  { "term": "TERM PLACEHOLDER PHRASE", "category": "threat", "severity": 5, "type": "phrase" }
+]

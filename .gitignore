@@ -201,6 +201,10 @@ cython_debug/
 .cursorignore
 .cursorindexingignore
 
+# Voicechat private lexicon (sample file remains committed)
+hacklytics_2026/apps/voicechats/flagging/flag_terms.json
+hacklytics_2026/apps/voicechats/flagging/private_flag_terms.json
+
 # Marimo
 marimo/_static/
 marimo/_lsp/

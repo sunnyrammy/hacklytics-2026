@@ -94,18 +94,13 @@ pip install -r requirements.txt
 ```bash
 export VOSK_MODEL_PATH="/absolute/or/project-relative/path/to/vosk-model"
 ```
-3. Configure Databricks variables:
+3. Configure local lexicon flagging:
 ```bash
-export DATABRICKS_HOST="https://dbc-xxxx.cloud.databricks.com"
-export DATABRICKS_TOKEN="<token>"
-export DATABRICKS_ENDPOINT="<endpoint-name-or-/serving-endpoints/.../invocations>"
-# Output normalization contract (backend-only, frontend always receives 0.0-1.0 score)
-export DATABRICKS_SCORE_TYPE="probability_0_1"  # probability_0_1 | percent_0_100 | logit | none
-export DATABRICKS_SCORE_FIELD="score"           # optional field path, e.g. predictions.0.score
-export DATABRICKS_LABEL_FIELD="label"           # optional field path
-export DATABRICKS_POSITIVE_CLASS="flag"         # optional label used for flagging
-# Optional per-endpoint override map (JSON string):
-# export DATABRICKS_ENDPOINT_OUTPUT_SPECS='{"endpoint-a":{"score_type":"percent_0_100","score_field":"toxicity"}}'
+export FLAGGING_PROVIDER="lexicon"
+# Committed sample lexicon with placeholder tokens only:
+export FLAG_TERMS_PATH="hacklytics_2026/apps/voicechats/flagging/sample_flag_terms.json"
+# For private demos, point to a local/private file outside git:
+# export FLAG_TERMS_PATH="/absolute/path/to/private_flag_terms.json"
 ```
 4. Run ASGI server:
 ```bash
@@ -119,9 +114,18 @@ http://127.0.0.1:8000/voicechat/
 ### Quick verification checklist
 
 - `GET /api/voicechat/health/` returns `"vosk_model_loaded": true` when `VOSK_MODEL_PATH` is valid.
-- `GET /api/voicechat/health/` returns `"databricks_reachable": true` when Databricks host/token/endpoint are valid.
+- `GET /api/voicechat/health/` returns `"flag_terms_loaded": true` and `"flagging_provider": "lexicon"` with a valid lexicon JSON.
 - Speaking into the mic shows live partial transcript updates in `/voicechat/`.
-- Finalized transcript segments emit Databricks score results (or `score_error` details if unreachable).
+- Finalized transcript segments emit local flagging results with `label`, `score_0_1`, `category_scores`, and redacted `matches`.
+
+### Sample lexicon format (safe placeholders only)
+
+```json
+[
+  { "term": "TERM", "category": "toxic", "severity": 2, "type": "word" },
+  { "term": "TERM PLACEHOLDER PHRASE", "category": "threat", "severity": 5, "type": "phrase" }
+]
+```
 
 ## Databricks CRUD examples
 

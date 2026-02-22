@@ -178,6 +178,11 @@ VOSK_MODEL_PATH = os.getenv(
     "VOSK_MODEL_PATH",
     str(BASE_DIR / "models" / "vosk-model-small-en-us-0.15"),
 )
+FLAGGING_PROVIDER = os.getenv("FLAGGING_PROVIDER", "lexicon").strip().lower() or "lexicon"
+FLAG_TERMS_PATH = os.getenv(
+    "FLAG_TERMS_PATH",
+    str(BASE_DIR / "hacklytics_2026" / "apps" / "voicechats" / "flagging" / "sample_flag_terms.json"),
+)
 DATABRICKS_HOST = os.getenv("DATABRICKS_HOST", "").rstrip("/")
 DATABRICKS_TOKEN = os.getenv("DATABRICKS_TOKEN", "")
 DATABRICKS_ENDPOINT = os.getenv(
