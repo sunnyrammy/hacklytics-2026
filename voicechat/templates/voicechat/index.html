@@ -8,17 +8,17 @@
     /* ── Reset & base ── */
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     :root {
-      --bg:        #0f1117;
-      --surface:   #1a1d27;
-      --panel:     #21253a;
-      --border:    #2e3350;
-      --text:      #e4e6f0;
-      --muted:     #7a7f9a;
+      --bg:        #f4f5f7;
+      --surface:   #ffffff;
+      --panel:     #eef0f4;
+      --border:    #d6d9e0;
+      --text:      #1a1d27;
+      --muted:     #6b7280;
       --accent:    #ff3621;      /* Databricks red */
-      --green:     #2ecc71;
-      --yellow:    #f1c40f;
-      --red:       #e74c3c;
-      --blue:      #5b8af7;
+      --green:     #16a34a;
+      --yellow:    #ca8a04;
+      --red:       #dc2626;
+      --blue:      #2563eb;
       --radius:    10px;
     }
     body {
@@ -53,7 +53,7 @@
     .databricks-badge {
       margin-left: auto;
       display: flex; align-items: center; gap: 8px;
-      background: #1c1c2e; border: 1px solid var(--border);
+      background: var(--panel); border: 1px solid var(--border);
       border-radius: 20px; padding: 5px 14px;
       font-size: .72rem; color: var(--muted);
     }
@@ -109,7 +109,7 @@
       position: relative; cursor: default;
     }
     .user-card:hover { background: var(--panel); }
-    .user-card.speaking { background: rgba(46,204,113,.07); }
+    .user-card.speaking { background: rgba(22,163,74,.07); }
     .user-card.suspended { opacity: .55; }
 
     .avatar {
@@ -140,7 +140,7 @@
       background: var(--panel); font-size: 12px; flex-shrink: 0;
       transition: background .3s;
     }
-    .user-card.suspended .mic-icon { background: rgba(231,76,60,.25); }
+    .user-card.suspended .mic-icon { background: rgba(220,38,38,.15); }
 
     .suspended-badge {
       position: absolute; top: -4px; right: -4px;
@@ -185,17 +185,17 @@
       to   { opacity: 1; transform: translateY(0); }
     }
     .caption-card.toxic-card {
-      border-color: rgba(231,76,60,.5);
-      background: rgba(231,76,60,.06);
+      border-color: rgba(220,38,38,.45);
+      background: rgba(220,38,38,.05);
       animation: slide-in .3s ease, toxic-flash .6s ease .3s;
     }
     @keyframes toxic-flash {
       0%,100% { box-shadow: none; }
-      50%      { box-shadow: 0 0 18px rgba(231,76,60,.45); }
+      50%      { box-shadow: 0 0 18px rgba(220,38,38,.3); }
     }
     .caption-card.warning-card {
-      border-color: rgba(241,196,15,.4);
-      background: rgba(241,196,15,.04);
+      border-color: rgba(202,138,4,.4);
+      background: rgba(202,138,4,.05);
     }
 
     .caption-meta {
@@ -226,20 +226,20 @@
       font-weight: 700; font-size: .68rem; letter-spacing: .3px;
     }
     .chip-analyzing {
-      background: rgba(91,138,247,.15);
-      color: var(--blue); border: 1px solid rgba(91,138,247,.3);
+      background: rgba(37,99,235,.08);
+      color: var(--blue); border: 1px solid rgba(37,99,235,.25);
     }
     .chip-clean {
-      background: rgba(46,204,113,.12);
-      color: var(--green); border: 1px solid rgba(46,204,113,.3);
+      background: rgba(22,163,74,.08);
+      color: var(--green); border: 1px solid rgba(22,163,74,.3);
     }
     .chip-warning {
-      background: rgba(241,196,15,.12);
-      color: var(--yellow); border: 1px solid rgba(241,196,15,.3);
+      background: rgba(202,138,4,.1);
+      color: var(--yellow); border: 1px solid rgba(202,138,4,.3);
     }
     .chip-toxic {
-      background: rgba(231,76,60,.18);
-      color: var(--red); border: 1px solid rgba(231,76,60,.4);
+      background: rgba(220,38,38,.1);
+      color: var(--red); border: 1px solid rgba(220,38,38,.35);
       animation: chip-blink .7s ease 2;
     }
     @keyframes chip-blink {
@@ -265,8 +265,8 @@
     /* Suspension notification */
     .suspend-notice {
       display: flex; align-items: center; gap: 8px;
-      background: rgba(231,76,60,.12);
-      border: 1px solid rgba(231,76,60,.3);
+      background: rgba(220,38,38,.07);
+      border: 1px solid rgba(220,38,38,.25);
       border-radius: 6px; padding: 5px 10px;
       font-size: .7rem; color: var(--red); font-weight: 600;
       margin-top: 6px;
@@ -316,12 +316,12 @@
       transition: background .4s, color .4s, border-color .4s;
     }
     .step.active {
-      background: rgba(91,138,247,.2);
+      background: rgba(37,99,235,.1);
       border-color: var(--blue); color: var(--blue);
     }
     .step.done {
-      background: rgba(46,204,113,.1);
-      border-color: rgba(46,204,113,.3); color: var(--green);
+      background: rgba(22,163,74,.08);
+      border-color: rgba(22,163,74,.35); color: var(--green);
     }
     .step-arrow { color: var(--muted); font-size: .7rem; }
 
@@ -373,9 +373,9 @@
       transition: all .4s ease;
     }
     .pb-step .step-icon { font-size: 13px; }
-    .pb-step.active { border-color: var(--blue); color: var(--blue); background: rgba(91,138,247,.1); }
-    .pb-step.done   { border-color: rgba(46,204,113,.4); color: var(--green); background: rgba(46,204,113,.07); }
-    .pb-step.flagged { border-color: rgba(231,76,60,.4); color: var(--red); background: rgba(231,76,60,.1); animation: chip-blink .5s ease 3; }
+    .pb-step.active  { border-color: var(--blue);  color: var(--blue);  background: rgba(37,99,235,.08); }
+    .pb-step.done    { border-color: rgba(22,163,74,.4);  color: var(--green); background: rgba(22,163,74,.07); }
+    .pb-step.flagged { border-color: rgba(220,38,38,.4);  color: var(--red);   background: rgba(220,38,38,.08); animation: chip-blink .5s ease 3; }
     .pb-arrow { color: var(--border); font-size: .9rem; }
 
     .progress-wrap { display: flex; align-items: center; gap: 10px; margin-left: auto; flex-shrink: 0; }
@@ -401,13 +401,13 @@
       font-size: .8rem; font-weight: 600;
       min-width: 260px; max-width: 320px;
       animation: toast-in .3s ease;
-      box-shadow: 0 4px 24px rgba(0,0,0,.4);
+      box-shadow: 0 4px 24px rgba(0,0,0,.12);
     }
     .toast.toast-toxic {
-      background: #2a1015; border: 1px solid rgba(231,76,60,.5); color: var(--red);
+      background: #fff1f1; border: 1px solid rgba(220,38,38,.35); color: var(--red);
     }
     .toast.toast-info {
-      background: #141b2a; border: 1px solid rgba(91,138,247,.4); color: var(--blue);
+      background: #eff6ff; border: 1px solid rgba(37,99,235,.3); color: var(--blue);
     }
     @keyframes toast-in {
       from { opacity: 0; transform: translateX(30px); }
