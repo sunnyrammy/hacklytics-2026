@@ -568,69 +568,56 @@
 <div id="toast-container"></div>
 
 <script>
-// ── Data ──────────────────────────────────────────────────────────────────────
 const USERS = [
-  { id: 0, name: 'Alex',   initials: 'AX', color: '#5b8af7', suspended: false },
+  { id: 0, name: 'You', initials: 'ME', color: '#5b8af7', suspended: false },
   { id: 1, name: 'Jordan', initials: 'JO', color: '#9b59b6', suspended: false },
-  { id: 2, name: 'Sam',    initials: 'SM', color: '#e67e22', suspended: false },
-  { id: 3, name: 'Riley',  initials: 'RI', color: '#1abc9c', suspended: false },
+  { id: 2, name: 'Sam', initials: 'SM', color: '#e67e22', suspended: false },
+  { id: 3, name: 'Riley', initials: 'RI', color: '#1abc9c', suspended: false },
   { id: 4, name: 'Taylor', initials: 'TY', color: '#e74c3c', suspended: false },
 ];
 
-// Script: [userId, text, toxicityScore (0-100), delayMs before this line]
-const SCRIPT = [
-  [0, "Hey everyone, ready to start the match?",                          4,  2200],
-  [1, "Yeah! Been waiting for this all day, let's go.",                   6,  3000],
-  [3, "I've got a strategy mapped out — stick together early game.",      5,  2800],
-  [2, "Sounds good, I'll cover the flanks and watch for flankers.",       7,  3200],
-  [4, "Let's make sure we communicate better than last round.",           3,  2500],
-  [0, "Watch the left side — they're pushing hard already!",              5,  2200],
-  [1, "Got it, falling back to defend the objective.",                    4,  2400],
-  [3, "Nice positioning everyone, keep rotating.",                        6,  2600],
-  [2, "You're all completely useless — just give up and stop playing!",  91,  3500],
-  [0, "Still alive, pushing toward the mid.",                             5,  2800],
-  [1, "Great callout, following your lead.",                              4,  2500],
-  [3, "Almost there — one more push and we take the point.",              7,  2800],
-  [4, "I hate this team, every single one of you is garbage!",           88,  3200],
-  [0, "Don't let that get to you, we're doing well.",                     5,  2600],
-  [1, "Good coordination everyone, keep it up!",                          6,  2400],
-  [3, "Victory incoming — excellent teamwork this round!",                4,  3000],
-  [0, "GG everyone, great game!",                                         3,  2500],
-  [1, "That was a solid match, well played.",                             5,  2200],
-];
-
-// ── State ────────────────────────────────────────────────────────────────────
+const ACTIVE_USER = USERS[0];
 let stats = { analyzed: 0, clean: 0, flagged: 0, suspended: 0 };
-let scriptIdx = 0;
 
-// ── Helpers ──────────────────────────────────────────────────────────────────
-function fmt_time() {
+let ws = null;
+let streamId = null;
+let mediaStream = null;
+let audioContext = null;
+let sourceNode = null;
+let processorNode = null;
+let activePartialEl = null;
+
+const PB_STEPS = ['pb-audio','pb-asr','pb-embed','pb-infer','pb-classify','pb-enforce'];
+const PIPE_STEPS = ['pipe-input','pipe-asr','pipe-token','pipe-model','pipe-score','pipe-action'];
+
+function fmtTime() {
   const d = new Date();
   return `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}:${String(d.getSeconds()).padStart(2,'0')}`;
 }
 
 function scoreColor(score) {
-  if (score < 30)  return 'var(--green)';
-  if (score < 60)  return 'var(--yellow)';
+  if (score < 30) return 'var(--green)';
+  if (score < 60) return 'var(--yellow)';
   return 'var(--red)';
 }
+
 function scoreLabel(score) {
-  if (score < 30)  return 'Clean';
-  if (score < 60)  return 'Low Risk';
-  if (score < 75)  return 'Warning';
+  if (score < 30) return 'Clean';
+  if (score < 60) return 'Low Risk';
+  if (score < 75) return 'Warning';
   return 'TOXIC';
 }
+
 function chipClass(score) {
-  if (score < 30)  return 'chip-clean';
-  if (score < 60)  return 'chip-warning';
+  if (score < 30) return 'chip-clean';
+  if (score < 60) return 'chip-warning';
   return 'chip-toxic';
 }
 
-// ── Build user list ────────────────────────────────────────────────────────
 function buildUserList() {
   const ul = document.getElementById('user-list');
   ul.innerHTML = '';
-  USERS.forEach(u => {
+  USERS.forEach((u) => {
     const card = document.createElement('div');
     card.className = 'user-card';
     card.id = `user-card-${u.id}`;
@@ -641,7 +628,7 @@ function buildUserList() {
       </div>
       <div class="user-info">
         <div class="user-name">${u.name}</div>
-        <div class="user-status" id="user-status-${u.id}">Listening</div>
+        <div class="user-status" id="user-status-${u.id}">${u.id === 0 ? 'Idle' : 'Listening'}</div>
       </div>
       <div class="mic-icon" id="mic-${u.id}">🎙️</div>
       <div class="suspended-badge">MUTED</div>
@@ -650,77 +637,59 @@ function buildUserList() {
   });
 }
 
-// ── Set speaking state ────────────────────────────────────────────────────
 function setSpeaking(userId, speaking) {
   const card = document.getElementById(`user-card-${userId}`);
   const status = document.getElementById(`user-status-${userId}`);
-  if (!card) return;
+  if (!card || !status) return;
   card.classList.toggle('speaking', speaking);
-  status.textContent = speaking ? '🟢 Speaking…' : 'Listening';
+  status.textContent = speaking ? '🟢 Speaking…' : (userId === 0 ? 'Listening' : 'Idle');
 }
 
-// ── Suspend user ──────────────────────────────────────────────────────────
-function suspendUser(userId) {
-  const u = USERS[userId];
-  if (u.suspended) return;
-  u.suspended = true;
-  const card = document.getElementById(`user-card-${userId}`);
-  const status = document.getElementById(`user-status-${userId}`);
-  const mic = document.getElementById(`mic-${userId}`);
-  if (!card) return;
-  card.classList.remove('speaking');
-  card.classList.add('suspended');
-  status.textContent = '🔴 SUSPENDED';
-  mic.textContent = '🚫';
-  stats.suspended++;
-  document.getElementById('stat-suspended').textContent = stats.suspended;
-  showToast(`🚨 ${u.name} has been suspended from voice chat`, 'toxic');
-}
-
-// ── Pipeline animation ─────────────────────────────────────────────────────
-const PB_STEPS = ['pb-audio','pb-asr','pb-embed','pb-infer','pb-classify','pb-enforce'];
-const PIPE_STEPS = ['pipe-input','pipe-asr','pipe-token','pipe-model','pipe-score','pipe-action'];
-
-function animatePipeline(isToxic, callback) {
-  // Reset
-  PB_STEPS.forEach(id => document.getElementById(id).className = 'pb-step');
-  PIPE_STEPS.forEach(id => { const el=document.getElementById(id); el.className='step'; });
+function animatePipeline(isToxic) {
+  PB_STEPS.forEach((id) => document.getElementById(id).className = 'pb-step');
+  PIPE_STEPS.forEach((id) => document.getElementById(id).className = 'step');
 
   let i = 0;
   const lastClass = isToxic ? 'flagged' : 'done';
-  function next() {
+  const step = () => {
     if (i > 0) {
-      document.getElementById(PB_STEPS[i-1]).className = `pb-step ${i===PB_STEPS.length ? lastClass : 'done'}`;
-      document.getElementById(PIPE_STEPS[i-1]).className = `step ${i===PIPE_STEPS.length ? lastClass : 'done'}`;
+      const doneCls = i === PB_STEPS.length ? lastClass : 'done';
+      document.getElementById(PB_STEPS[i - 1]).className = `pb-step ${doneCls}`;
+      document.getElementById(PIPE_STEPS[i - 1]).className = `step ${doneCls}`;
     }
     if (i < PB_STEPS.length) {
       document.getElementById(PB_STEPS[i]).className = 'pb-step active';
       document.getElementById(PIPE_STEPS[i]).className = 'step active';
-      i++;
-      setTimeout(next, isToxic ? 280 : 220);
-    } else {
-      // All done — mark last
-      document.getElementById(PB_STEPS[PB_STEPS.length-1]).className = `pb-step ${lastClass}`;
-      document.getElementById(PIPE_STEPS[PIPE_STEPS.length-1]).className = `step ${lastClass}`;
-      if (callback) callback();
+      i += 1;
+      setTimeout(step, isToxic ? 260 : 200);
     }
-  }
-  next();
+  };
+  step();
 }
 
-// ── Score bar ─────────────────────────────────────────────────────────────
 function updateScoreBar(score) {
-  const val   = document.getElementById('last-score-val');
+  const val = document.getElementById('last-score-val');
   const label = document.getElementById('last-score-label');
-  const bar   = document.getElementById('last-score-bar');
-  val.textContent   = `${score.toFixed(1)}%`;
+  const bar = document.getElementById('last-score-bar');
+  val.textContent = `${score.toFixed(1)}%`;
   label.textContent = scoreLabel(score);
-  val.style.color   = scoreColor(score);
-  bar.style.width   = `${score}%`;
+  val.style.color = scoreColor(score);
+  bar.style.width = `${score}%`;
   bar.style.background = scoreColor(score);
 }
 
-// ── Toxic log ─────────────────────────────────────────────────────────────
+function showToast(msg, type='info') {
+  const container = document.getElementById('toast-container');
+  const t = document.createElement('div');
+  t.className = `toast toast-${type}`;
+  t.innerHTML = `<span class="toast-icon">${type === 'toxic' ? '🚨' : 'ℹ️'}</span><span>${msg}</span>`;
+  container.appendChild(t);
+  setTimeout(() => {
+    t.style.animation = 'toast-out .3s ease forwards';
+    setTimeout(() => t.remove(), 300);
+  }, 3500);
+}
+
 function addToxicLog(user, text, score) {
   const log = document.getElementById('toxic-log');
   const empty = document.getElementById('log-empty');
@@ -736,39 +705,25 @@ function addToxicLog(user, text, score) {
   log.scrollTop = log.scrollHeight;
 }
 
-// ── Toast ─────────────────────────────────────────────────────────────────
-function showToast(msg, type='info') {
-  const container = document.getElementById('toast-container');
-  const t = document.createElement('div');
-  t.className = `toast toast-${type}`;
-  t.innerHTML = `<span class="toast-icon">${type==='toxic'?'🚨':'ℹ️'}</span><span>${msg}</span>`;
-  container.appendChild(t);
-  setTimeout(() => {
-    t.style.animation = 'toast-out .3s ease forwards';
-    setTimeout(() => t.remove(), 300);
-  }, 4000);
-}
-
-// ── Caption card ──────────────────────────────────────────────────────────
-function addCaption(user, text) {
+function addCaptionCard(user, text, isPartial=false) {
   const feed = document.getElementById('captions-feed');
   const empty = document.getElementById('empty-state');
   if (empty) empty.remove();
 
   const card = document.createElement('div');
   card.className = 'caption-card';
-  card.id = `caption-${Date.now()}`;
+  card.id = `caption-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
   card.innerHTML = `
     <div class="caption-meta">
       <div class="caption-avatar" style="background:${user.color}22;color:${user.color};">${user.initials}</div>
       <span class="caption-speaker" style="color:${user.color};">${user.name}</span>
-      <span class="caption-time">${fmt_time()}</span>
+      <span class="caption-time">${fmtTime()}</span>
     </div>
     <div class="caption-text">${text}</div>
     <div class="ai-analysis">
       <span class="ai-label">Databricks AI:</span>
-      <span class="analysis-chip chip-analyzing" id="chip-${card.id}">
-        <div class="spinner"></div> Analyzing…
+      <span class="analysis-chip ${isPartial ? 'chip-analyzing' : 'chip-clean'}" id="chip-${card.id}">
+        ${isPartial ? '<div class="spinner"></div> Listening…' : 'Queued'}
       </span>
       <div class="confidence-bar" style="display:none;" id="bar-wrap-${card.id}">
         <div class="confidence-fill" id="bar-${card.id}" style="width:0%;"></div>
@@ -780,104 +735,293 @@ function addCaption(user, text) {
   return card;
 }
 
-function resolveCaption(card, score, user, text) {
-  const chipId = `chip-${card.id}`;
-  const chip = document.getElementById(chipId);
+function updatePartial(text) {
+  if (!text) return;
+  if (!activePartialEl) {
+    const card = addCaptionCard(ACTIVE_USER, text, true);
+    activePartialEl = card.querySelector('.caption-text');
+  } else {
+    activePartialEl.textContent = text;
+  }
+}
+
+function clearPartial() {
+  if (activePartialEl) {
+    const card = activePartialEl.closest('.caption-card');
+    if (card) card.remove();
+    activePartialEl = null;
+  }
+}
+
+function resolveCaption(card, score, responsePayload, text) {
+  const chip = document.getElementById(`chip-${card.id}`);
   const barWrap = document.getElementById(`bar-wrap-${card.id}`);
   const bar = document.getElementById(`bar-${card.id}`);
+
+  if (typeof score !== 'number') {
+    chip.className = 'analysis-chip chip-warning';
+    chip.textContent = 'Databricks unavailable';
+    return;
+  }
+
   const isToxic = score >= 75;
   const isWarning = score >= 30 && score < 75;
 
   chip.className = `analysis-chip ${chipClass(score)}`;
-  chip.innerHTML = `${isToxic ? '🚨' : isWarning ? '⚠️' : '✅'} ${scoreLabel(score)} — ${score.toFixed(1)}%`;
+  chip.textContent = `${isToxic ? '🚨' : isWarning ? '⚠️' : '✅'} ${scoreLabel(score)} — ${score.toFixed(1)}%`;
 
   barWrap.style.display = 'block';
   setTimeout(() => {
     bar.style.width = `${score}%`;
     bar.style.background = scoreColor(score);
-  }, 50);
+  }, 40);
 
   if (isToxic) {
     card.classList.add('toxic-card');
-    const notice = document.createElement('div');
-    notice.className = 'suspend-notice';
-    notice.innerHTML = `🔇 Microphone access revoked — policy violation detected`;
-    card.appendChild(notice);
+    addToxicLog(ACTIVE_USER, text, score);
+    showToast('Toxic content detected in final transcript', 'toxic');
   } else if (isWarning) {
     card.classList.add('warning-card');
   }
 
-  // stats
-  stats.analyzed++;
-  if (isToxic || isWarning) stats.flagged++;
-  else stats.clean++;
+  stats.analyzed += 1;
+  if (isToxic || isWarning) stats.flagged += 1;
+  else stats.clean += 1;
+
   document.getElementById('stat-analyzed').textContent = stats.analyzed;
-  document.getElementById('stat-clean').textContent    = stats.clean;
-  document.getElementById('stat-flagged').textContent  = stats.flagged;
-
-  // progress
-  const total = SCRIPT.length;
-  const pct = Math.round((stats.analyzed / total) * 100);
-  document.getElementById('progress-fill').style.width = pct + '%';
-  document.getElementById('progress-label').textContent = `${stats.analyzed} / ${total} analyzed`;
-
+  document.getElementById('stat-clean').textContent = stats.clean;
+  document.getElementById('stat-flagged').textContent = stats.flagged;
+  document.getElementById('progress-fill').style.width = '100%';
+  document.getElementById('progress-label').textContent = `${stats.analyzed} analyzed`;
   updateScoreBar(score);
+  animatePipeline(isToxic);
+}
 
-  if (isToxic) {
-    addToxicLog(user, text, score);
-    suspendUser(user.id);
+function downsampleBuffer(input, inSampleRate, outSampleRate) {
+  if (outSampleRate === inSampleRate) return input;
+  if (outSampleRate > inSampleRate) {
+    throw new Error('Output sample rate must be lower than input sample rate.');
+  }
+
+  const ratio = inSampleRate / outSampleRate;
+  const outputLength = Math.round(input.length / ratio);
+  const output = new Float32Array(outputLength);
+  let inputIndex = 0;
+
+  for (let i = 0; i < outputLength; i += 1) {
+    const nextInputIndex = Math.round((i + 1) * ratio);
+    let sum = 0;
+    let count = 0;
+    while (inputIndex < nextInputIndex && inputIndex < input.length) {
+      sum += input[inputIndex];
+      count += 1;
+      inputIndex += 1;
+    }
+    output[i] = count > 0 ? sum / count : 0;
+  }
+  return output;
+}
+
+function floatTo16BitPCM(float32Buffer) {
+  const int16Buffer = new Int16Array(float32Buffer.length);
+  for (let i = 0; i < float32Buffer.length; i += 1) {
+    const sample = Math.max(-1, Math.min(1, float32Buffer[i]));
+    int16Buffer[i] = sample < 0 ? sample * 0x8000 : sample * 0x7fff;
+  }
+  return int16Buffer;
+}
+
+async function sendChunkHttp(pcmBuffer) {
+  if (!streamId) streamId = crypto.randomUUID();
+  const resp = await fetch(`/api/voicechat/transcribe/?stream_id=${encodeURIComponent(streamId)}&sample_rate=16000`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/octet-stream' },
+    body: pcmBuffer,
+  });
+  if (!resp.ok) return;
+  const data = await resp.json();
+  if (data.partial) updatePartial(data.partial);
+  if (data.final) {
+    clearPartial();
+    const card = addCaptionCard(ACTIVE_USER, data.final, false);
+    const score = data.score && typeof data.score.score === 'number' ? data.score.score * 100 : null;
+    resolveCaption(card, score, data.score, data.final);
   }
 }
 
-// ── Main simulation loop ───────────────────────────────────────────────────
-function runNext() {
-  if (scriptIdx >= SCRIPT.length) {
-    showToast('✅ Session complete — all messages analyzed', 'info');
+function handleServerEvent(data) {
+  if (data.type === 'partial') {
+    updatePartial(data.text || '');
+    setSpeaking(ACTIVE_USER.id, true);
     return;
   }
-  const [userId, text, score, delay] = SCRIPT[scriptIdx++];
-  const user = USERS[userId];
 
-  setTimeout(() => {
-    // If user is suspended, skip silently and run next
-    if (user.suspended) {
-      runNext();
+  if (data.type === 'segment') {
+    clearPartial();
+    setSpeaking(ACTIVE_USER.id, false);
+    const card = addCaptionCard(ACTIVE_USER, data.text || '', false);
+    card.dataset.segmentText = data.text || '';
+    return;
+  }
+
+  if (data.type === 'score') {
+    const allCards = [...document.querySelectorAll('.caption-card')].reverse();
+    const target = allCards.find((c) => c.dataset.segmentText === data.text);
+    const normalizedScore = typeof data.score === 'number'
+      ? (data.score <= 1 ? data.score * 100 : data.score)
+      : null;
+    if (target) resolveCaption(target, normalizedScore, data.response, data.text || '');
+    return;
+  }
+
+  if (data.type === 'score_error') {
+    showToast(`Databricks scoring error: ${data.error}`, 'info');
+    return;
+  }
+
+  if (data.type === 'error') {
+    showToast(`Voicechat error: ${data.error}`, 'toxic');
+  }
+}
+
+async function startStreaming() {
+  const scheme = window.location.protocol === 'https:' ? 'wss' : 'ws';
+  const wsUrl = `${scheme}://${window.location.host}/ws/voicechat/stream/`;
+
+  mediaStream = await navigator.mediaDevices.getUserMedia({
+    audio: {
+      channelCount: 1,
+      echoCancellation: true,
+      noiseSuppression: true,
+      autoGainControl: true,
+    },
+  });
+
+  audioContext = new (window.AudioContext || window.webkitAudioContext)();
+  sourceNode = audioContext.createMediaStreamSource(mediaStream);
+  processorNode = audioContext.createScriptProcessor(4096, 1, 1);
+
+  ws = new WebSocket(wsUrl);
+  ws.binaryType = 'arraybuffer';
+
+  let useHttpFallback = false;
+  ws.onopen = () => {
+    ws.send(JSON.stringify({ type: 'start', sample_rate: 16000 }));
+    showToast('Voice stream connected', 'info');
+  };
+
+  ws.onmessage = (event) => {
+    try {
+      const data = JSON.parse(event.data);
+      handleServerEvent(data);
+    } catch (_err) {}
+  };
+
+  ws.onerror = () => {
+    useHttpFallback = true;
+    showToast('WebSocket unavailable, falling back to HTTP chunks', 'info');
+  };
+
+  ws.onclose = () => {
+    if (!useHttpFallback) {
+      showToast('Voice stream closed', 'info');
+    }
+  };
+
+  processorNode.onaudioprocess = async (event) => {
+    const channelData = event.inputBuffer.getChannelData(0);
+    const downsampled = downsampleBuffer(channelData, audioContext.sampleRate, 16000);
+    const pcm16 = floatTo16BitPCM(downsampled);
+    const buffer = pcm16.buffer;
+
+    if (ws && ws.readyState === WebSocket.OPEN && !useHttpFallback) {
+      ws.send(buffer);
       return;
     }
 
-    // Start speaking
-    setSpeaking(userId, true);
+    if (useHttpFallback) {
+      await sendChunkHttp(buffer);
+    }
+  };
 
-    // Simulate speaking duration based on text length
-    const speakDuration = Math.max(1200, text.length * 55);
-
-    setTimeout(() => {
-      setSpeaking(userId, false);
-
-      // Add caption
-      const card = addCaption(user, text);
-
-      // Animate pipeline then resolve
-      const analyzeDelay = 600 + Math.random() * 400;
-      animatePipeline(score >= 75, () => {
-        setTimeout(() => {
-          resolveCaption(card, score, user, text);
-          // Schedule next
-          setTimeout(runNext, 800);
-        }, analyzeDelay);
-      });
-    }, speakDuration);
-
-  }, delay);
+  sourceNode.connect(processorNode);
+  processorNode.connect(audioContext.destination);
+  document.getElementById('user-status-0').textContent = 'Listening';
 }
 
-// ── Boot ──────────────────────────────────────────────────────────────────
+async function stopStreaming() {
+  if (processorNode) {
+    processorNode.disconnect();
+    processorNode.onaudioprocess = null;
+    processorNode = null;
+  }
+  if (sourceNode) {
+    sourceNode.disconnect();
+    sourceNode = null;
+  }
+  if (mediaStream) {
+    mediaStream.getTracks().forEach((track) => track.stop());
+    mediaStream = null;
+  }
+  if (audioContext) {
+    await audioContext.close();
+    audioContext = null;
+  }
+
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({ type: 'stop' }));
+  }
+  ws = null;
+
+  if (streamId) {
+    await fetch('/api/voicechat/finalize/', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ stream_id: streamId }),
+    }).catch(() => {});
+    streamId = null;
+  }
+
+  clearPartial();
+  setSpeaking(ACTIVE_USER.id, false);
+  document.getElementById('user-status-0').textContent = 'Idle';
+}
+
+async function checkHealth() {
+  try {
+    const resp = await fetch('/api/voicechat/health/');
+    const data = await resp.json();
+    if (!data.vosk_model_loaded) {
+      showToast(`Vosk not loaded: ${data.details.vosk_error || 'unknown error'}`, 'toxic');
+      return false;
+    }
+    if (!data.databricks_reachable) {
+      showToast('Databricks unreachable; transcription will continue without scoring', 'info');
+    }
+    return true;
+  } catch (_err) {
+    showToast('Health check failed', 'toxic');
+    return false;
+  }
+}
+
 buildUserList();
-// Small intro delay
-setTimeout(() => {
-  showToast('🎙️ Voice session started — AI moderation active', 'info');
-  setTimeout(runNext, 1200);
-}, 800);
+showToast('Requesting microphone access…', 'info');
+
+window.addEventListener('beforeunload', () => {
+  stopStreaming().catch(() => {});
+});
+
+(async () => {
+  const healthy = await checkHealth();
+  if (!healthy) return;
+  try {
+    await startStreaming();
+    showToast('Live transcription started', 'info');
+  } catch (error) {
+    showToast(`Unable to start microphone stream: ${error.message}`, 'toxic');
+  }
+})();
 </script>
 </body>
 </html>

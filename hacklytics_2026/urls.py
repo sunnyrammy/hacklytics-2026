@@ -23,6 +23,7 @@ urlpatterns = [
     path('admin/', admin.site.urls),
     path("databricks/", include("hacklytics_2026.apps.databricks.urls")),
     path("api/", include("hacklytics_2026.apps.databricks.urls")),
+    path("api/voicechat/", include("hacklytics_2026.apps.voicechats.api_urls")),
     path("demo/live-audio", live_audio_demo, name="live-audio-demo"),
     path("voicechat/", include("hacklytics_2026.apps.voicechats.urls")),
     path("", home, name="home"),
