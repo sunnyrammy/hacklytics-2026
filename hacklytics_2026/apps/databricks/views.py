@@ -7,7 +7,7 @@ from django.shortcuts import render
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 
-from .databricks_client import DatabricksAPIError, DatabricksClient
+from .databricks_client import DatabricksAPIError, DatabricksClient, read_endpoint_config
 from .services import create_product, delete_product, list_products, update_product_price
 
 
@@ -125,14 +125,14 @@ def predict(request: HttpRequest) -> HttpResponse:
         text = payload.get("text")
         if not isinstance(text, str) or not text.strip():
             return _json_error("'text' must be a non-empty string.", 400)
-        input_column = os.getenv("DATABRICKS_INPUT_COLUMN", "comment_text")
+        input_column = os.getenv("DATABRICKS_INPUT_COLUMN", "text")
         invocation_payload = {"dataframe_records": [{input_column: text}]}
     else:
         return _json_error("Provide either 'records' or 'text' in the request body.", 400)
 
-    endpoint_name = os.getenv("DATABRICKS_SERVING_ENDPOINT_NAME")
+    _, endpoint_name = read_endpoint_config()
     if not endpoint_name:
-        return _json_error("DATABRICKS_SERVING_ENDPOINT_NAME is not configured.", 500)
+        return _json_error("DATABRICKS endpoint is not configured.", 500)
 
     try:
         client = _get_client()
