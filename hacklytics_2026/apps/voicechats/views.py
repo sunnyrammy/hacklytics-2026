@@ -3,7 +3,6 @@ import logging
 import threading
 import time
 import uuid
-from typing import Any
 
 from django.conf import settings
 from django.http import HttpRequest, HttpResponse, JsonResponse
@@ -17,7 +16,7 @@ from .stt.vosk_engine import accept_audio, create_recognizer, load_model
 LOGGER = logging.getLogger(__name__)
 _STREAM_LOCK = threading.Lock()
 _STREAM_TTL_SECONDS = 300
-_STREAMS: dict[str, dict[str, Any]] = {}
+_STREAMS: dict[str, dict[str, object]] = {}
 
 
 def index(request):
@@ -32,26 +31,6 @@ def _cleanup_streams() -> None:
             expired.append(stream_id)
     for stream_id in expired:
         _STREAMS.pop(stream_id, None)
-
-
-def _extract_numeric_score(payload: Any) -> float | None:
-    if isinstance(payload, (int, float)):
-        return float(payload)
-    if isinstance(payload, dict):
-        for key in ("toxicity", "score", "probability", "toxic", "prediction"):
-            value = payload.get(key)
-            if isinstance(value, (int, float)):
-                return float(value)
-        for value in payload.values():
-            score = _extract_numeric_score(value)
-            if score is not None:
-                return score
-    if isinstance(payload, list):
-        for item in payload:
-            score = _extract_numeric_score(item)
-            if score is not None:
-                return score
-    return None
 
 
 @require_GET
@@ -98,36 +77,54 @@ def transcribe_chunk(request: HttpRequest) -> JsonResponse:
             try:
                 model = load_model(str(getattr(settings, "VOSK_MODEL_PATH", "")))
                 recognizer = create_recognizer(model, sample_rate)
-                state = {"recognizer": recognizer, "segments": [], "sample_rate": sample_rate}
+                state = {
+                    "recognizer": recognizer,
+                    "segments": [],
+                    "sample_rate": sample_rate,
+                    "segment_counter": 0,
+                }
                 _STREAMS[stream_id] = state
             except Exception as exc:
                 LOGGER.exception("Failed to initialize stream %s: %s", stream_id, exc)
                 return JsonResponse({"error": str(exc)}, status=500)
 
         state["updated_at"] = time.time()
-        result = accept_audio(state["recognizer"], chunk)
+        recognizer = state["recognizer"]
+        if not hasattr(recognizer, "AcceptWaveform"):
+            return JsonResponse({"error": "Invalid stream recognizer state."}, status=500)
+        result = accept_audio(recognizer, chunk)
         partial = result.get("partial", "")
         final = result.get("final", "")
         score_payload = None
+        segment_id = None
         if final:
-            state["segments"].append(final)
+            state["segment_counter"] = int(state.get("segment_counter", 0)) + 1
+            segment_id = str(state["segment_counter"])
+            segments = state["segments"]
+            if isinstance(segments, list):
+                segments.append(final)
             try:
                 response = call_databricks_inference(final, settings)
-                score = _extract_numeric_score(response)
                 score_payload = {
+                    "segment_id": segment_id,
                     "text": final,
-                    "score": score,
-                    "flagged": bool(score is not None and score >= float(getattr(settings, "TOXICITY_THRESHOLD", 0.7))),
-                    "response": response,
+                    "label": response.get("label"),
+                    "score": response.get("score"),
+                    "severity": response.get("severity"),
+                    "threshold_used": response.get("threshold_used"),
+                    "flagged": bool(response.get("flagged")),
+                    "endpoint_id": response.get("endpoint_id"),
+                    "raw": response.get("raw"),
                 }
             except Exception as exc:
-                score_payload = {"error": str(exc), "text": final}
+                score_payload = {"segment_id": segment_id, "error": str(exc), "text": final}
 
     return JsonResponse(
         {
             "stream_id": stream_id,
             "partial": partial,
             "final": final,
+            "segment_id": segment_id,
             "score": score_payload,
         }
     )
@@ -151,11 +148,17 @@ def finalize_stream(request: HttpRequest) -> JsonResponse:
 
     final_text = ""
     try:
-        final_payload = json.loads(state["recognizer"].FinalResult())
+        recognizer = state["recognizer"]
+        if not hasattr(recognizer, "FinalResult"):
+            return JsonResponse({"error": "Invalid stream recognizer state."}, status=500)
+        final_payload = json.loads(recognizer.FinalResult())
         tail = (final_payload.get("text") or "").strip()
+        segments = state.get("segments", [])
+        if not isinstance(segments, list):
+            segments = []
         if tail:
-            state["segments"].append(tail)
-        final_text = " ".join(state["segments"]).strip()
+            segments.append(tail)
+        final_text = " ".join(segments).strip()
     except Exception as exc:
         return JsonResponse({"error": f"Failed to finalize stream: {exc}"}, status=500)
 
