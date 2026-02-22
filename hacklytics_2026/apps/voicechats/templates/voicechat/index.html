@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>EchoGuard — AI Voice Moderation · Databricks</title>
+  <title>EchoGuard — AI Voice Moderation · Local Lexicon</title>
   <style>
     /* ── Reset & base ── */
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -14,7 +14,7 @@
       --border:    #d6d9e0;
       --text:      #1a1d27;
       --muted:     #6b7280;
-      --accent:    #ff3621;      /* Databricks red */
+      --accent:    #ff3621;
       --green:     #16a34a;
       --yellow:    #ca8a04;
       --red:       #dc2626;
@@ -218,6 +218,12 @@
     .ai-analysis {
       display: flex; align-items: center; gap: 8px;
       font-size: .7rem;
+    }
+    .analysis-detail {
+      margin-top: 6px;
+      font-size: .68rem;
+      color: var(--muted);
+      line-height: 1.4;
     }
     .ai-label { color: var(--muted); }
     .analysis-chip {
@@ -436,7 +442,7 @@
   </div>
   <div class="databricks-badge">
     <div class="live-dot"></div>
-    Powered by <span>Databricks AI</span> · DBRX Instruct
+    Powered by <span>Local Lexicon</span> · Offline Flagging
   </div>
 </header>
 
@@ -542,7 +548,7 @@
 
   <!-- Pipeline Bar (bottom) -->
   <div id="pipeline-bar">
-    <div class="pipeline-bar-label">DATABRICKS PIPELINE</div>
+    <div class="pipeline-bar-label">LOCAL FLAGGING PIPELINE</div>
     <div class="pipeline-bar-steps">
       <div class="pb-step" id="pb-audio"><span class="step-icon">🎙️</span> Audio Capture</div>
       <span class="pb-arrow">→</span>
@@ -577,16 +583,16 @@ const USERS = [
 ];
 
 const SCRIPT = [
-  [0, 'Hey team, let\'s lock in and play objective.', 8, 1600],
-  [1, 'Copy that. I\'ll watch the left corridor.', 11, 1900],
-  [2, 'Nice callout. Rotating now.', 7, 1800],
-  [3, 'Push together in three, two, one.', 12, 2100],
-  [4, 'You are all useless trash, uninstall the game.', 93, 2300],
-  [0, 'Ignore that. Stay focused and regroup.', 9, 1600],
-  [1, 'Objective almost clear, keep pressure.', 13, 1800],
-  [2, 'I\'ll cover spawn side and hold angle.', 14, 1900],
-  [3, 'Great round, finish strong.', 10, 1800],
-  [4, 'GG, we close this now.', 6, 1400],
+  [0, 'Hey team, let\'s lock in and play objective.', { label: 'ok', flagged: false, score_0_1: 0.0, category_scores: {}, matches: [] }, 1600],
+  [1, 'Copy that. I\'ll watch the left corridor.', { label: 'ok', flagged: false, score_0_1: 0.0, category_scores: {}, matches: [] }, 1900],
+  [2, 'Nice callout. Rotating now.', { label: 'ok', flagged: false, score_0_1: 0.0, category_scores: {}, matches: [] }, 1800],
+  [3, 'Push together in three, two, one.', { label: 'ok', flagged: false, score_0_1: 0.0, category_scores: {}, matches: [] }, 2100],
+  [4, 'TERM PLACEHOLDER PHRASE detected in audio sample.', { label: 'flag', flagged: true, score_0_1: 0.8, category_scores: { threat: 0.83 }, matches: [{ category: 'threat', severity: 5, start: 0, end: 24, redacted: true }, { category: 'toxic', severity: 3, start: 26, end: 34, redacted: true }] }, 2300],
+  [0, 'Ignore that. Stay focused and regroup.', { label: 'ok', flagged: false, score_0_1: 0.0, category_scores: {}, matches: [] }, 1600],
+  [1, 'Objective almost clear, keep pressure.', { label: 'ok', flagged: false, score_0_1: 0.0, category_scores: {}, matches: [] }, 1800],
+  [2, 'I\'ll cover spawn side and hold angle.', { label: 'ok', flagged: false, score_0_1: 0.0, category_scores: {}, matches: [] }, 1900],
+  [3, 'Great round, finish strong.', { label: 'ok', flagged: false, score_0_1: 0.0, category_scores: {}, matches: [] }, 1800],
+  [4, 'GG, we close this now.', { label: 'ok', flagged: false, score_0_1: 0.0, category_scores: {}, matches: [] }, 1400],
 ];
 
 let stats = { analyzed: 0, clean: 0, flagged: 0, suspended: 0 };
@@ -600,22 +606,27 @@ function fmtTime() {
   return `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}:${String(d.getSeconds()).padStart(2,'0')}`;
 }
 
-function scoreColor(score) {
-  if (score < 30) return 'var(--green)';
-  if (score < 60) return 'var(--yellow)';
+function toPercent(score01) {
+  const value = Number(score01 || 0) * 100;
+  return Math.max(0, Math.min(100, value));
+}
+
+function scoreColor(scorePct) {
+  if (scorePct < 30) return 'var(--green)';
+  if (scorePct < 60) return 'var(--yellow)';
   return 'var(--red)';
 }
 
-function scoreLabel(score) {
-  if (score < 30) return 'Clean';
-  if (score < 60) return 'Low Risk';
-  if (score < 75) return 'Warning';
+function scoreLabel(scorePct) {
+  if (scorePct < 30) return 'Clean';
+  if (scorePct < 60) return 'Low Risk';
+  if (scorePct < 75) return 'Warning';
   return 'TOXIC';
 }
 
-function chipClass(score) {
-  if (score < 30) return 'chip-clean';
-  if (score < 60) return 'chip-warning';
+function chipClass(scorePct) {
+  if (scorePct < 30) return 'chip-clean';
+  if (scorePct < 60) return 'chip-warning';
   return 'chip-toxic';
 }
 
@@ -726,6 +737,7 @@ function addCaption(user, text) {
         <div class="confidence-fill" id="bar-${card.id}" style="width:0%;"></div>
       </div>
     </div>
+    <div class="analysis-detail" id="detail-${card.id}"></div>
   `;
 
   feed.appendChild(card);
@@ -733,52 +745,82 @@ function addCaption(user, text) {
   return card;
 }
 
-function updateScoreMeter(score) {
+function updateScoreMeter(scorePct) {
   const valueEl = document.getElementById('last-score-val');
   const labelEl = document.getElementById('last-score-label');
   const barEl = document.getElementById('last-score-bar');
-  valueEl.textContent = `${score.toFixed(1)}%`;
-  labelEl.textContent = scoreLabel(score);
-  valueEl.style.color = scoreColor(score);
-  barEl.style.width = `${score}%`;
-  barEl.style.background = scoreColor(score);
+  valueEl.textContent = `${scorePct.toFixed(1)}%`;
+  labelEl.textContent = scoreLabel(scorePct);
+  valueEl.style.color = scoreColor(scorePct);
+  barEl.style.width = `${scorePct}%`;
+  barEl.style.background = scoreColor(scorePct);
 }
 
-function addToxicLog(user, text, score) {
+function summarizeCategories(categoryScores, matches) {
+  const matchCounts = {};
+  (matches || []).forEach((item) => {
+    const key = item.category || 'generic';
+    matchCounts[key] = (matchCounts[key] || 0) + 1;
+  });
+
+  const lines = Object.entries(categoryScores || {}).map(([category, value]) => {
+    const scorePct = toPercent(value);
+    const count = matchCounts[category] || 0;
+    return `${category}: ${scorePct.toFixed(0)}% (${count})`;
+  });
+  if (!lines.length) return 'No category flags.';
+  return `Category scores: ${lines.join(' · ')}`;
+}
+
+function addToxicLog(user, analysis, scorePct) {
   const log = document.getElementById('toxic-log');
   const empty = document.getElementById('log-empty');
   if (empty) empty.remove();
+  const categoryCounts = {};
+  (analysis.matches || []).forEach((item) => {
+    const key = item.category || 'generic';
+    categoryCounts[key] = (categoryCounts[key] || 0) + 1;
+  });
+  const categorySummary = Object.entries(categoryCounts).map(([key, value]) => `${key}:${value}`).join(', ') || 'redacted';
   const row = document.createElement('div');
   row.className = 'toxic-log-item';
   row.innerHTML = `
     <span class="log-user" style="color:${user.color}">${user.name}</span>
-    <span class="log-text" title="${text}">${text}</span>
-    <span class="log-score">${score.toFixed(0)}%</span>
+    <span class="log-text">redacted · ${categorySummary}</span>
+    <span class="log-score">${scorePct.toFixed(0)}%</span>
   `;
   log.appendChild(row);
   log.scrollTop = log.scrollHeight;
 }
 
-function resolveCaption(card, score, user, text) {
+function resolveCaption(card, analysis, user) {
   const chip = document.getElementById(`chip-${card.id}`);
+  const detail = document.getElementById(`detail-${card.id}`);
   const barWrap = document.getElementById(`bar-wrap-${card.id}`);
   const bar = document.getElementById(`bar-${card.id}`);
+  const captionText = card.querySelector('.caption-text');
+  const scorePct = toPercent(analysis.score_0_1);
 
-  const isToxic = score >= 75;
-  const isWarning = score >= 30 && score < 75;
+  const isToxic = Boolean(analysis.flagged) && scorePct >= 75;
+  const isWarning = Boolean(analysis.flagged) && scorePct < 75;
 
-  chip.className = `analysis-chip ${chipClass(score)}`;
-  chip.textContent = `${isToxic ? '🚨' : isWarning ? '⚠️' : '✅'} ${scoreLabel(score)} — ${score.toFixed(1)}%`;
+  chip.className = `analysis-chip ${chipClass(scorePct)}`;
+  chip.textContent = `${isToxic ? '🚨' : isWarning ? '⚠️' : '✅'} ${analysis.label.toUpperCase()} — ${scorePct.toFixed(1)}%`;
+  detail.textContent = summarizeCategories(analysis.category_scores, analysis.matches);
 
   barWrap.style.display = 'block';
   setTimeout(() => {
-    bar.style.width = `${score}%`;
-    bar.style.background = scoreColor(score);
+    bar.style.width = `${scorePct}%`;
+    bar.style.background = scoreColor(scorePct);
   }, 60);
+
+  if (analysis.flagged && captionText) {
+    captionText.textContent = '[Redacted flagged segment]';
+  }
 
   if (isToxic) {
     card.classList.add('toxic-card');
-    addToxicLog(user, text, score);
+    addToxicLog(user, analysis, scorePct);
     const suspendMsg = document.createElement('div');
     suspendMsg.className = 'suspend-notice';
     suspendMsg.textContent = '🔇 Simulated enforcement triggered';
@@ -789,7 +831,7 @@ function resolveCaption(card, score, user, text) {
   }
 
   stats.analyzed += 1;
-  if (isToxic || isWarning) stats.flagged += 1;
+  if (analysis.flagged) stats.flagged += 1;
   else stats.clean += 1;
 
   document.getElementById('stat-analyzed').textContent = stats.analyzed;
@@ -798,7 +840,7 @@ function resolveCaption(card, score, user, text) {
   document.getElementById('progress-fill').style.width = `${Math.round((stats.analyzed / SCRIPT.length) * 100)}%`;
   document.getElementById('progress-label').textContent = `${stats.analyzed} / ${SCRIPT.length} analyzed`;
 
-  updateScoreMeter(score);
+  updateScoreMeter(scorePct);
 }
 
 function runNext() {
@@ -807,7 +849,7 @@ function runNext() {
     return;
   }
 
-  const [userId, text, score, delay] = SCRIPT[scriptIdx++];
+  const [userId, text, analysis, delay] = SCRIPT[scriptIdx++];
   const user = USERS[userId];
 
   setTimeout(() => {
@@ -823,9 +865,9 @@ function runNext() {
       setSpeaking(userId, false);
 
       const card = addCaption(user, text);
-      animatePipeline(score >= 75, () => {
+      animatePipeline(Boolean(analysis.flagged), () => {
         setTimeout(() => {
-          resolveCaption(card, score, user, text);
+          resolveCaption(card, analysis, user);
           setTimeout(runNext, 700);
         }, 350 + Math.random() * 200);
       });

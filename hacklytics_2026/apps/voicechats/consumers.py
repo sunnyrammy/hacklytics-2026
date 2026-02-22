@@ -5,7 +5,7 @@ from asgiref.sync import sync_to_async
 from channels.generic.websocket import AsyncWebsocketConsumer
 from django.conf import settings
 
-from .flagging.classifier import classify_text
+from .flagging import classify_text
 from .stt.vosk_engine import accept_audio, create_recognizer, load_model
 
 LOGGER = logging.getLogger(__name__)
@@ -127,10 +127,9 @@ class VoiceChatStreamConsumer(AsyncWebsocketConsumer):
                     "text": finalized_text,
                     "transcript": response.get("transcript"),
                     "label": response.get("label"),
-                    "score": response.get("score"),
                     "score_0_1": response.get("score_0_1"),
-                    "severity": response.get("severity"),
                     "flagged": bool(response.get("flagged")),
+                    "category_scores": response.get("category_scores", {}),
                     "matches": response.get("matches", []),
                 }
             )

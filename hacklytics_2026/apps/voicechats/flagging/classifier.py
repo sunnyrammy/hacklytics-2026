@@ -1,234 +1,201 @@
-import json
 import logging
 import re
 from pathlib import Path
 from typing import Any
 
+from django.conf import settings
+
+from .lexicon_loader import load_lexicon
+
 LOGGER = logging.getLogger(__name__)
 
-_WORD_RE = re.compile(r"\w+")
-_NON_ALNUM_RE = re.compile(r"[^a-z0-9]+")
+_APOSTROPHE_VARIANTS = {"’", "‘", "`", "´"}
+_TOKEN_CHAR_RE = re.compile(r"[a-z0-9']")
 
 
-def load_flag_terms(path: str | Path) -> list[dict[str, Any]]:
-    with Path(path).open("r", encoding="utf-8") as handle:
-        payload = json.load(handle)
-
-    terms: list[dict[str, Any]] = []
-    if not isinstance(payload, list):
-        return terms
-
-    for item in payload:
-        if not isinstance(item, dict):
-            continue
-        term = str(item.get("term", "")).strip().lower()
-        if not term:
-            continue
-        severity_raw = item.get("severity", 1)
-        try:
-            severity = max(1, int(severity_raw))
-        except (TypeError, ValueError):
-            severity = 1
-
-        normalized_term, _ = normalize_text(term)
-        if normalized_term:
-            terms.append({"term": normalized_term, "severity": severity})
-    return terms
-
-
-def normalize_text(text: str) -> tuple[str, list[int]]:
-    # Build a normalized text representation while keeping an index map into the original text.
+def normalize_for_matching(text: str) -> tuple[str, list[int]]:
     normalized_chars: list[str] = []
     index_map: list[int] = []
     pending_space = False
-    saw_content = False
+    wrote_token = False
 
-    for idx, ch in enumerate(text):
-        lowered = ch.lower()
-        if lowered.isalnum():
-            if pending_space and saw_content:
+    for idx, char in enumerate(text):
+        lowered = char.lower()
+        if lowered in _APOSTROPHE_VARIANTS:
+            lowered = "'"
+
+        if _TOKEN_CHAR_RE.fullmatch(lowered):
+            if pending_space and wrote_token:
                 normalized_chars.append(" ")
                 index_map.append(idx)
+                pending_space = False
             normalized_chars.append(lowered)
             index_map.append(idx)
-            pending_space = False
-            saw_content = True
-        elif lowered.isspace() or _NON_ALNUM_RE.match(lowered):
-            if saw_content:
+            wrote_token = True
+            continue
+
+        if lowered.isspace() or not _TOKEN_CHAR_RE.fullmatch(lowered):
+            if wrote_token:
                 pending_space = True
 
-    normalized = "".join(normalized_chars).strip()
-    if not normalized:
+    normalized_text = "".join(normalized_chars).strip()
+    if not normalized_text:
         return "", []
-    return normalized, index_map[: len(normalized)]
+    return normalized_text, index_map[: len(normalized_text)]
 
 
-def _edit_distance_at_most_one(left: str, right: str) -> bool:
-    if left == right:
-        return True
-    if abs(len(left) - len(right)) > 1:
-        return False
+def _compile_pattern(normalized_term: str) -> re.Pattern[str]:
+    escaped = re.escape(normalized_term)
+    escaped = escaped.replace(r"\ ", r"\s+")
+    return re.compile(rf"\b{escaped}\b", flags=re.IGNORECASE)
 
-    i = 0
-    j = 0
-    edits = 0
-    while i < len(left) and j < len(right):
-        if left[i] == right[j]:
-            i += 1
-            j += 1
+
+def _build_matchers(lexicon: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    phrase_matchers: list[dict[str, Any]] = []
+    word_matchers: list[dict[str, Any]] = []
+
+    for entry in lexicon:
+        normalized_term, _ = normalize_for_matching(str(entry["term"]))
+        if not normalized_term:
             continue
-        edits += 1
-        if edits > 1:
-            return False
-        if len(left) > len(right):
-            i += 1
-        elif len(right) > len(left):
-            j += 1
+
+        matcher = {
+            "category": str(entry["category"]),
+            "severity": int(entry["severity"]),
+            "pattern": _compile_pattern(normalized_term),
+            "normalized_term": normalized_term,
+        }
+
+        if str(entry["type"]) == "phrase":
+            phrase_matchers.append(matcher)
         else:
-            i += 1
-            j += 1
+            word_matchers.append(matcher)
 
-    if i < len(left) or j < len(right):
-        edits += 1
-    return edits <= 1
+    return phrase_matchers, word_matchers
 
 
-def _compile_patterns(terms: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    compiled: list[dict[str, Any]] = []
-    for item in terms:
-        term = str(item["term"])
-        severity = int(item["severity"])
-        compiled.append(
-            {
-                "term": term,
-                "severity": severity,
-                "pattern": re.compile(rf"\b{re.escape(term)}\b", flags=re.IGNORECASE),
-            }
-        )
-    return compiled
+def _spans_overlap(left: tuple[int, int], right: tuple[int, int]) -> bool:
+    return not (left[1] <= right[0] or right[1] <= left[0])
 
 
-def _collect_exact_matches(normalized_text: str, index_map: list[int]) -> tuple[list[dict[str, Any]], set[tuple[int, int, str]]]:
-    matches: list[dict[str, Any]] = []
-    seen: set[tuple[int, int, str]] = set()
-    for item in _FLAG_PATTERNS:
-        for hit in item["pattern"].finditer(normalized_text):
-            start_n = hit.start()
-            end_n = hit.end()
-            if start_n >= len(index_map) or end_n - 1 >= len(index_map):
+def _add_matches(
+    matchers: list[dict[str, Any]],
+    normalized_text: str,
+    index_map: list[int],
+    occupied_spans: list[tuple[int, int]],
+    matches: list[dict[str, Any]],
+    category_totals: dict[str, int],
+) -> None:
+    for matcher in matchers:
+        for hit in matcher["pattern"].finditer(normalized_text):
+            norm_span = (hit.start(), hit.end())
+            if any(_spans_overlap(norm_span, taken) for taken in occupied_spans):
                 continue
-            start_o = index_map[start_n]
-            end_o = index_map[end_n - 1] + 1
-            key = (start_o, end_o, item["term"])
-            if key in seen:
+            if norm_span[0] >= len(index_map) or norm_span[1] - 1 >= len(index_map):
                 continue
-            seen.add(key)
+
+            start = index_map[norm_span[0]]
+            end = index_map[norm_span[1] - 1] + 1
+            category = str(matcher["category"])
+            severity = int(matcher["severity"])
+
             matches.append(
                 {
-                    "term": item["term"],
-                    "start": start_o,
-                    "end": end_o,
-                    "severity": item["severity"],
+                    "category": category,
+                    "severity": severity,
+                    "start": start,
+                    "end": end,
+                    "redacted": True,
                 }
             )
-    return matches, seen
-
-
-def _collect_fuzzy_matches(
-    normalized_text: str, index_map: list[int], seen: set[tuple[int, int, str]]
-) -> list[dict[str, Any]]:
-    if not normalized_text:
-        return []
-
-    fuzzy_matches: list[dict[str, Any]] = []
-    words = list(_WORD_RE.finditer(normalized_text))
-    for item in _HIGH_SEVERITY_SINGLE_WORD_TERMS:
-        target = str(item["term"])
-        if len(target) < 5:
-            continue
-        exact_pattern = item["pattern"]
-        if exact_pattern.search(normalized_text):
-            continue
-
-        for word_match in words:
-            candidate = word_match.group(0)
-            if not _edit_distance_at_most_one(candidate, target):
-                continue
-            start_n = word_match.start()
-            end_n = word_match.end()
-            if start_n >= len(index_map) or end_n - 1 >= len(index_map):
-                continue
-            start_o = index_map[start_n]
-            end_o = index_map[end_n - 1] + 1
-            key = (start_o, end_o, target)
-            if key in seen:
-                continue
-            seen.add(key)
-            fuzzy_matches.append(
-                {
-                    "term": target,
-                    "start": start_o,
-                    "end": end_o,
-                    "severity": int(item["severity"]),
-                }
-            )
-    return fuzzy_matches
+            occupied_spans.append(norm_span)
+            category_totals[category] = category_totals.get(category, 0) + severity
 
 
 def classify_text(text: str) -> dict[str, Any]:
     transcript = (text or "").strip()
     if not transcript:
         return {
-            "transcript": transcript,
-            "flagged": False,
+            "transcript": "",
             "label": "ok",
+            "flagged": False,
             "score_0_1": 0.0,
+            "category_scores": {},
             "matches": [],
+            # Backward-compatible alias for older UI code.
             "score": 0.0,
-            "severity": 0,
         }
 
-    normalized_text, index_map = normalize_text(transcript)
-    matches, seen = _collect_exact_matches(normalized_text, index_map)
+    normalized_text, index_map = normalize_for_matching(transcript)
+    occupied_spans: list[tuple[int, int]] = []
+    matches: list[dict[str, Any]] = []
+    category_totals: dict[str, int] = {}
 
-    # Optional typo-tolerant fallback for severe single-word terms.
-    matches.extend(_collect_fuzzy_matches(normalized_text, index_map, seen))
+    # Match phrases before words to keep higher-context detections.
+    _add_matches(_PHRASE_MATCHERS, normalized_text, index_map, occupied_spans, matches, category_totals)
+    _add_matches(_WORD_MATCHERS, normalized_text, index_map, occupied_spans, matches, category_totals)
     matches.sort(key=lambda item: (item["start"], item["end"]))
 
-    total_severity = sum(int(item.get("severity", 0)) for item in matches)
-    score = min(1.0, total_severity / 10.0)
-    flagged = score > 0.0
+    total = sum(match["severity"] for match in matches)
+    score_0_1 = min(1.0, float(total) / 10.0)
+    category_scores = {category: min(1.0, value / 6.0) for category, value in category_totals.items()}
+    flagged = score_0_1 > 0.0
     label = "flag" if flagged else "ok"
 
     if matches:
-        LOGGER.info("Flag matches found count=%s terms=%s", len(matches), [m["term"] for m in matches])
+        LOGGER.info(
+            "Flagged transcript segment match_count=%s categories=%s",
+            len(matches),
+            sorted(category_totals.keys()),
+        )
 
     return {
         "transcript": transcript,
-        "flagged": flagged,
         "label": label,
-        "score_0_1": score,
+        "flagged": flagged,
+        "score_0_1": score_0_1,
+        "category_scores": category_scores,
         "matches": matches,
-        # Backward-compatible fields consumed by existing UI code.
-        "score": score,
-        "severity": int(round(score * 100)),
+        # Backward-compatible alias for older UI code.
+        "score": score_0_1,
     }
 
 
 def flag_terms_status() -> dict[str, Any]:
-    return {"flag_terms_loaded": _FLAG_TERMS_LOADED, "flag_terms_count": len(_FLAG_TERMS)}
+    return {
+        "flag_terms_loaded": _FLAG_TERMS_LOADED,
+        "flag_terms_count": len(_LEXICON),
+        "flag_terms_path": str(_LEXICON_PATH),
+        "flag_terms_path_exists": _LEXICON_PATH.exists(),
+        "flag_terms_parse_ok": _FLAG_TERMS_PARSE_OK,
+    }
 
 
-_FLAG_TERMS_PATH = Path(__file__).resolve().parent / "flag_terms.json"
+def _default_lexicon_path() -> Path:
+    return Path(__file__).resolve().parent / "sample_flag_terms.json"
+
+
+def _resolve_lexicon_path() -> Path:
+    configured = str(getattr(settings, "FLAG_TERMS_PATH", "") or "").strip()
+    if configured:
+        return Path(configured).expanduser().resolve()
+    return _default_lexicon_path()
+
+
+_LEXICON_PATH = _resolve_lexicon_path()
 try:
-    _FLAG_TERMS = load_flag_terms(_FLAG_TERMS_PATH)
+    _LEXICON = load_lexicon(_LEXICON_PATH)
     _FLAG_TERMS_LOADED = True
-except Exception as exc:  # pragma: no cover
-    LOGGER.exception("Failed to load flag terms: %s", exc)
-    _FLAG_TERMS = []
+    _FLAG_TERMS_PARSE_OK = True
+except FileNotFoundError:
+    LOGGER.warning("Flag lexicon file missing at configured path.")
+    _LEXICON = []
     _FLAG_TERMS_LOADED = False
+    _FLAG_TERMS_PARSE_OK = False
+except Exception:
+    LOGGER.exception("Failed loading flag lexicon metadata.")
+    _LEXICON = []
+    _FLAG_TERMS_LOADED = False
+    _FLAG_TERMS_PARSE_OK = False
 
-_FLAG_PATTERNS = _compile_patterns(_FLAG_TERMS)
-_HIGH_SEVERITY_SINGLE_WORD_TERMS = [
-    entry for entry in _FLAG_PATTERNS if " " not in str(entry["term"]) and int(entry["severity"]) >= 3
-]
+_PHRASE_MATCHERS, _WORD_MATCHERS = _build_matchers(_LEXICON)

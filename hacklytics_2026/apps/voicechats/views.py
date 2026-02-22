@@ -10,7 +10,7 @@ from django.shortcuts import render
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_GET, require_http_methods
 
-from .flagging.classifier import classify_text, flag_terms_status
+from .flagging import classify_text, flag_terms_status
 from .stt.vosk_engine import accept_audio, create_recognizer, load_model
 
 LOGGER = logging.getLogger(__name__)
@@ -48,6 +48,9 @@ def health(request: HttpRequest) -> JsonResponse:
             "vosk_model_loaded": vosk_loaded,
             "flag_terms_loaded": bool(terms_status.get("flag_terms_loaded")),
             "flag_terms_count": int(terms_status.get("flag_terms_count", 0)),
+            "flagging_provider": "lexicon",
+            "flag_terms_path_exists": bool(terms_status.get("flag_terms_path_exists")),
+            "flag_terms_parse_ok": bool(terms_status.get("flag_terms_parse_ok")),
         }
     )
 
@@ -105,10 +108,9 @@ def transcribe_chunk(request: HttpRequest) -> JsonResponse:
                     "text": final,
                     "transcript": response.get("transcript"),
                     "label": response.get("label"),
-                    "score": response.get("score"),
                     "score_0_1": response.get("score_0_1"),
-                    "severity": response.get("severity"),
                     "flagged": bool(response.get("flagged")),
+                    "category_scores": response.get("category_scores", {}),
                     "matches": response.get("matches", []),
                 }
             except Exception as exc:

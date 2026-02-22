@@ -12,6 +12,9 @@ class VoiceChatApiTests(TestCase):
         self.assertIn("vosk_model_loaded", payload)
         self.assertIn("flag_terms_loaded", payload)
         self.assertIn("flag_terms_count", payload)
+        self.assertIn("flagging_provider", payload)
+        self.assertIn("flag_terms_path_exists", payload)
+        self.assertIn("flag_terms_parse_ok", payload)
 
     def test_transcribe_requires_audio_body(self):
         response = self.client.post(
@@ -34,11 +37,14 @@ class VoiceChatApiTests(TestCase):
 
 class LocalFlaggingTests(TestCase):
     def test_classifier_flags_known_term(self):
-        result = classify_text("You are useless trash.")
+        result = classify_text("TERM should trigger a local flag.")
         self.assertTrue(result["flagged"])
         self.assertEqual(result["label"], "flag")
         self.assertGreater(result["score_0_1"], 0.0)
         self.assertGreater(len(result["matches"]), 0)
+        self.assertIn("category_scores", result)
+        self.assertTrue(all(match.get("redacted") is True for match in result["matches"]))
+        self.assertTrue(all("term" not in match for match in result["matches"]))
 
     def test_classifier_clean_text_is_ok(self):
         result = classify_text("Team regroup and rotate left.")
@@ -48,15 +54,19 @@ class LocalFlaggingTests(TestCase):
         self.assertEqual(result["matches"], [])
 
     def test_word_boundary_safe(self):
-        result = classify_text("This class is hard.")
-        self.assertFalse(any(match["term"] == "ass" for match in result["matches"]))
+        result = classify_text("TERMINAL output should not trigger TERM.")
+        # One exact TERM token should match; TERMINAL must not trigger.
+        self.assertEqual(len(result["matches"]), 1)
 
     def test_multi_word_phrase_match(self):
-        result = classify_text("Please uninstall the game now.")
-        self.assertTrue(any(match["term"] == "uninstall the game" for match in result["matches"]))
+        result = classify_text("This includes TERM PLACEHOLDER PHRASE now.")
+        self.assertTrue(result["flagged"])
+        self.assertTrue(any(match["category"] == "threat" for match in result["matches"]))
 
     def test_flag_terms_status(self):
         status = flag_terms_status()
         self.assertIn("flag_terms_loaded", status)
         self.assertIn("flag_terms_count", status)
         self.assertGreaterEqual(int(status["flag_terms_count"]), 1)
+        self.assertIn("flag_terms_path_exists", status)
+        self.assertIn("flag_terms_parse_ok", status)
