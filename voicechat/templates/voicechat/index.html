@@ -1,0 +1,883 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ToxiGuard — AI Voice Moderation · Databricks</title>
+  <style>
+    /* ── Reset & base ── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg:        #f4f5f7;
+      --surface:   #ffffff;
+      --panel:     #eef0f4;
+      --border:    #d6d9e0;
+      --text:      #1a1d27;
+      --muted:     #6b7280;
+      --accent:    #ff3621;      /* Databricks red */
+      --green:     #16a34a;
+      --yellow:    #ca8a04;
+      --red:       #dc2626;
+      --blue:      #2563eb;
+      --radius:    10px;
+    }
+    body {
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    /* ── Header ── */
+    header {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      padding: 10px 22px;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+    .logo-icon {
+      width: 36px; height: 36px;
+      background: var(--accent);
+      border-radius: 8px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 18px; font-weight: 900; color: #fff;
+    }
+    header h1 { font-size: 1.1rem; font-weight: 700; letter-spacing: .3px; }
+    header p  { font-size: .75rem; color: var(--muted); }
+    .databricks-badge {
+      margin-left: auto;
+      display: flex; align-items: center; gap: 8px;
+      background: var(--panel); border: 1px solid var(--border);
+      border-radius: 20px; padding: 5px 14px;
+      font-size: .72rem; color: var(--muted);
+    }
+    .databricks-badge span { color: var(--accent); font-weight: 700; }
+    .live-dot {
+      width: 8px; height: 8px; border-radius: 50%;
+      background: var(--green);
+      animation: pulse-live 1.4s ease-in-out infinite;
+    }
+    @keyframes pulse-live {
+      0%,100% { opacity: 1; transform: scale(1); }
+      50%      { opacity: .4; transform: scale(.8); }
+    }
+
+    /* ── Main layout ── */
+    .main {
+      display: grid;
+      grid-template-columns: 240px 1fr 280px;
+      grid-template-rows: 1fr auto;
+      gap: 0;
+      flex: 1;
+      overflow: hidden;
+    }
+
+    /* ── Shared panel ── */
+    .panel {
+      background: var(--surface);
+      border-right: 1px solid var(--border);
+      display: flex; flex-direction: column;
+      overflow: hidden;
+    }
+    .panel-header {
+      padding: 12px 16px;
+      font-size: .7rem; font-weight: 700; letter-spacing: 1.2px;
+      text-transform: uppercase; color: var(--muted);
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+      display: flex; align-items: center; gap: 8px;
+    }
+    .panel-header .count {
+      background: var(--panel);
+      border-radius: 12px; padding: 1px 8px;
+      font-size: .68rem; color: var(--text);
+    }
+
+    /* ── Voice channel panel ── */
+    #voice-panel { grid-column: 1; grid-row: 1; }
+    .user-list { flex: 1; overflow-y: auto; padding: 8px; }
+    .user-card {
+      display: flex; align-items: center; gap: 10px;
+      padding: 9px 10px; border-radius: var(--radius);
+      margin-bottom: 4px; transition: background .2s;
+      position: relative; cursor: default;
+    }
+    .user-card:hover { background: var(--panel); }
+    .user-card.speaking { background: rgba(22,163,74,.07); }
+    .user-card.suspended { opacity: .55; }
+
+    .avatar {
+      width: 36px; height: 36px; border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-weight: 700; font-size: .85rem; flex-shrink: 0;
+      position: relative;
+    }
+    .speaking-ring {
+      position: absolute; inset: -4px; border-radius: 50%;
+      border: 2px solid var(--green);
+      animation: speaking-pulse 1s ease-in-out infinite;
+      opacity: 0; pointer-events: none;
+    }
+    .user-card.speaking .speaking-ring { opacity: 1; }
+    @keyframes speaking-pulse {
+      0%,100% { transform: scale(1);   opacity: .9; }
+      50%      { transform: scale(1.18); opacity: .3; }
+    }
+
+    .user-info { flex: 1; min-width: 0; }
+    .user-name { font-size: .85rem; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .user-status { font-size: .7rem; color: var(--muted); }
+
+    .mic-icon {
+      width: 26px; height: 26px; border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      background: var(--panel); font-size: 12px; flex-shrink: 0;
+      transition: background .3s;
+    }
+    .user-card.suspended .mic-icon { background: rgba(220,38,38,.15); }
+
+    .suspended-badge {
+      position: absolute; top: -4px; right: -4px;
+      background: var(--red); color: #fff;
+      font-size: .55rem; font-weight: 800; letter-spacing: .5px;
+      border-radius: 4px; padding: 1px 4px;
+      display: none;
+    }
+    .user-card.suspended .suspended-badge { display: block; }
+
+    /* ── Captions panel ── */
+    #captions-panel {
+      grid-column: 2; grid-row: 1;
+      background: var(--bg);
+      border-right: 1px solid var(--border);
+      display: flex; flex-direction: column; overflow: hidden;
+    }
+    .captions-header {
+      padding: 12px 18px;
+      font-size: .7rem; font-weight: 700; letter-spacing: 1.2px;
+      text-transform: uppercase; color: var(--muted);
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+      display: flex; align-items: center; gap: 10px;
+    }
+    .captions-feed {
+      flex: 1; overflow-y: auto; padding: 12px 16px;
+      display: flex; flex-direction: column; gap: 10px;
+    }
+    .captions-feed::-webkit-scrollbar { width: 4px; }
+    .captions-feed::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+
+    .caption-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 10px 14px;
+      animation: slide-in .3s ease;
+    }
+    @keyframes slide-in {
+      from { opacity: 0; transform: translateY(10px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+    .caption-card.toxic-card {
+      border-color: rgba(220,38,38,.45);
+      background: rgba(220,38,38,.05);
+      animation: slide-in .3s ease, toxic-flash .6s ease .3s;
+    }
+    @keyframes toxic-flash {
+      0%,100% { box-shadow: none; }
+      50%      { box-shadow: 0 0 18px rgba(220,38,38,.3); }
+    }
+    .caption-card.warning-card {
+      border-color: rgba(202,138,4,.4);
+      background: rgba(202,138,4,.05);
+    }
+
+    .caption-meta {
+      display: flex; align-items: center; gap: 8px;
+      margin-bottom: 6px;
+    }
+    .caption-avatar {
+      width: 20px; height: 20px; border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-size: .6rem; font-weight: 700; flex-shrink: 0;
+    }
+    .caption-speaker { font-size: .78rem; font-weight: 700; }
+    .caption-time { font-size: .68rem; color: var(--muted); margin-left: auto; }
+    .caption-text {
+      font-size: .88rem; line-height: 1.5; color: var(--text);
+      margin-bottom: 8px;
+    }
+
+    /* AI analysis row */
+    .ai-analysis {
+      display: flex; align-items: center; gap: 8px;
+      font-size: .7rem;
+    }
+    .ai-label { color: var(--muted); }
+    .analysis-chip {
+      display: flex; align-items: center; gap: 5px;
+      border-radius: 20px; padding: 2px 10px;
+      font-weight: 700; font-size: .68rem; letter-spacing: .3px;
+    }
+    .chip-analyzing {
+      background: rgba(37,99,235,.08);
+      color: var(--blue); border: 1px solid rgba(37,99,235,.25);
+    }
+    .chip-clean {
+      background: rgba(22,163,74,.08);
+      color: var(--green); border: 1px solid rgba(22,163,74,.3);
+    }
+    .chip-warning {
+      background: rgba(202,138,4,.1);
+      color: var(--yellow); border: 1px solid rgba(202,138,4,.3);
+    }
+    .chip-toxic {
+      background: rgba(220,38,38,.1);
+      color: var(--red); border: 1px solid rgba(220,38,38,.35);
+      animation: chip-blink .7s ease 2;
+    }
+    @keyframes chip-blink {
+      0%,100% { opacity: 1; } 50% { opacity: .4; }
+    }
+    .spinner {
+      width: 10px; height: 10px; border-radius: 50%;
+      border: 2px solid transparent;
+      border-top-color: var(--blue);
+      animation: spin .7s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .confidence-bar {
+      flex: 1; height: 4px; background: var(--panel);
+      border-radius: 2px; overflow: hidden; max-width: 100px;
+    }
+    .confidence-fill {
+      height: 100%; border-radius: 2px;
+      transition: width .8s ease;
+    }
+
+    /* Suspension notification */
+    .suspend-notice {
+      display: flex; align-items: center; gap: 8px;
+      background: rgba(220,38,38,.07);
+      border: 1px solid rgba(220,38,38,.25);
+      border-radius: 6px; padding: 5px 10px;
+      font-size: .7rem; color: var(--red); font-weight: 600;
+      margin-top: 6px;
+    }
+
+    /* ── Stats panel ── */
+    #stats-panel {
+      grid-column: 3; grid-row: 1;
+      overflow-y: auto;
+    }
+    #stats-panel .panel-header { flex-direction: column; align-items: flex-start; gap: 2px; }
+    .stats-body { padding: 14px 14px; display: flex; flex-direction: column; gap: 14px; }
+
+    .stat-card {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 12px 14px;
+    }
+    .stat-label { font-size: .68rem; color: var(--muted); text-transform: uppercase; letter-spacing: .8px; margin-bottom: 4px; }
+    .stat-value { font-size: 1.6rem; font-weight: 800; }
+    .stat-value.green  { color: var(--green); }
+    .stat-value.red    { color: var(--red); }
+    .stat-value.yellow { color: var(--yellow); }
+    .stat-value.blue   { color: var(--blue); }
+    .stat-sub { font-size: .7rem; color: var(--muted); margin-top: 2px; }
+
+    /* Pipeline viz */
+    .pipeline-section {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 12px 14px;
+    }
+    .pipeline-title {
+      font-size: .7rem; font-weight: 700; letter-spacing: .8px;
+      text-transform: uppercase; color: var(--muted); margin-bottom: 10px;
+    }
+    .pipeline-steps {
+      display: flex; align-items: center; gap: 3px;
+      font-size: .6rem; flex-wrap: wrap;
+    }
+    .step {
+      padding: 4px 8px; border-radius: 5px;
+      background: var(--surface); border: 1px solid var(--border);
+      color: var(--muted); white-space: nowrap;
+      transition: background .4s, color .4s, border-color .4s;
+    }
+    .step.active {
+      background: rgba(37,99,235,.1);
+      border-color: var(--blue); color: var(--blue);
+    }
+    .step.done {
+      background: rgba(22,163,74,.08);
+      border-color: rgba(22,163,74,.35); color: var(--green);
+    }
+    .step-arrow { color: var(--muted); font-size: .7rem; }
+
+    /* Toxic log */
+    .toxic-log-section {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+    }
+    .toxic-log-header {
+      padding: 9px 12px;
+      font-size: .68rem; font-weight: 700;
+      text-transform: uppercase; letter-spacing: .8px; color: var(--red);
+      border-bottom: 1px solid var(--border);
+      display: flex; align-items: center; gap: 6px;
+    }
+    .toxic-log-list { padding: 6px 0; max-height: 180px; overflow-y: auto; }
+    .toxic-log-item {
+      padding: 6px 12px;
+      font-size: .7rem; border-bottom: 1px solid var(--border);
+      display: flex; align-items: flex-start; gap: 8px;
+    }
+    .toxic-log-item:last-child { border-bottom: none; }
+    .log-user { font-weight: 700; flex-shrink: 0; }
+    .log-text { color: var(--muted); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 130px; }
+    .log-score { font-weight: 700; color: var(--red); flex-shrink: 0; }
+    .log-empty { padding: 14px 12px; font-size: .72rem; color: var(--muted); text-align: center; }
+
+    /* ── Bottom pipeline bar ── */
+    #pipeline-bar {
+      grid-column: 1 / -1; grid-row: 2;
+      background: var(--surface);
+      border-top: 1px solid var(--border);
+      padding: 10px 20px;
+      display: flex; align-items: center; gap: 20px;
+      flex-shrink: 0;
+    }
+    .pipeline-bar-label { font-size: .7rem; color: var(--muted); font-weight: 600; white-space: nowrap; }
+    .pipeline-bar-steps {
+      display: flex; align-items: center; gap: 6px;
+      font-size: .72rem; flex: 1;
+    }
+    .pb-step {
+      display: flex; align-items: center; gap: 6px;
+      padding: 4px 12px; border-radius: 20px;
+      border: 1px solid var(--border); color: var(--muted);
+      background: var(--panel); white-space: nowrap;
+      transition: all .4s ease;
+    }
+    .pb-step .step-icon { font-size: 13px; }
+    .pb-step.active  { border-color: var(--blue);  color: var(--blue);  background: rgba(37,99,235,.08); }
+    .pb-step.done    { border-color: rgba(22,163,74,.4);  color: var(--green); background: rgba(22,163,74,.07); }
+    .pb-step.flagged { border-color: rgba(220,38,38,.4);  color: var(--red);   background: rgba(220,38,38,.08); animation: chip-blink .5s ease 3; }
+    .pb-arrow { color: var(--border); font-size: .9rem; }
+
+    .progress-wrap { display: flex; align-items: center; gap: 10px; margin-left: auto; flex-shrink: 0; }
+    .progress-bar {
+      width: 120px; height: 6px; background: var(--panel);
+      border-radius: 3px; overflow: hidden;
+    }
+    .progress-fill {
+      height: 100%; background: linear-gradient(90deg, var(--blue), var(--accent));
+      border-radius: 3px; transition: width .6s ease;
+      width: 0%;
+    }
+    .progress-label { font-size: .7rem; color: var(--muted); white-space: nowrap; }
+
+    /* ── Toast ── */
+    #toast-container {
+      position: fixed; top: 60px; right: 20px;
+      display: flex; flex-direction: column; gap: 8px; z-index: 100;
+    }
+    .toast {
+      display: flex; align-items: center; gap: 10px;
+      padding: 12px 16px; border-radius: var(--radius);
+      font-size: .8rem; font-weight: 600;
+      min-width: 260px; max-width: 320px;
+      animation: toast-in .3s ease;
+      box-shadow: 0 4px 24px rgba(0,0,0,.12);
+    }
+    .toast.toast-toxic {
+      background: #fff1f1; border: 1px solid rgba(220,38,38,.35); color: var(--red);
+    }
+    .toast.toast-info {
+      background: #eff6ff; border: 1px solid rgba(37,99,235,.3); color: var(--blue);
+    }
+    @keyframes toast-in {
+      from { opacity: 0; transform: translateX(30px); }
+      to   { opacity: 1; transform: translateX(0); }
+    }
+    @keyframes toast-out {
+      from { opacity: 1; transform: translateX(0); }
+      to   { opacity: 0; transform: translateX(30px); }
+    }
+    .toast-icon { font-size: 18px; flex-shrink: 0; }
+
+    /* Scrollbars */
+    ::-webkit-scrollbar { width: 4px; height: 4px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+  </style>
+</head>
+<body>
+
+<!-- ── Header ── -->
+<header>
+  <div class="logo-icon">TG</div>
+  <div>
+    <h1>ToxiGuard Voice Moderation</h1>
+    <p>Real-time AI toxicity detection for voice channels</p>
+  </div>
+  <div class="databricks-badge">
+    <div class="live-dot"></div>
+    Powered by <span>Databricks AI</span> · DBRX Instruct
+  </div>
+</header>
+
+<!-- ── Main ── -->
+<div class="main">
+
+  <!-- Voice Channel Panel -->
+  <div class="panel" id="voice-panel">
+    <div class="panel-header">
+      🔊 Voice Channel — Game Lobby
+      <span class="count" id="user-count">5</span>
+    </div>
+    <div class="user-list" id="user-list"></div>
+  </div>
+
+  <!-- Captions Feed -->
+  <div id="captions-panel">
+    <div class="captions-header">
+      💬 Live Captions
+      <span style="font-size:.68rem;color:var(--muted);margin-left:auto;">
+        Auto-transcribed · AI-analyzed
+      </span>
+    </div>
+    <div class="captions-feed" id="captions-feed">
+      <div id="empty-state" style="margin:auto;text-align:center;color:var(--muted);font-size:.82rem;line-height:1.8;">
+        <div style="font-size:2rem;margin-bottom:8px;">🎙️</div>
+        Waiting for participants to speak…<br/>
+        Captions will appear here in real time.
+      </div>
+    </div>
+  </div>
+
+  <!-- Stats Panel -->
+  <div class="panel" id="stats-panel" style="border-right:none;border-left:1px solid var(--border);">
+    <div class="panel-header">
+      📊 AI Model Dashboard
+    </div>
+    <div class="stats-body">
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+        <div class="stat-card">
+          <div class="stat-label">Analyzed</div>
+          <div class="stat-value blue" id="stat-analyzed">0</div>
+          <div class="stat-sub">messages</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Clean</div>
+          <div class="stat-value green" id="stat-clean">0</div>
+          <div class="stat-sub">messages</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Flagged</div>
+          <div class="stat-value yellow" id="stat-flagged">0</div>
+          <div class="stat-sub">messages</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Suspended</div>
+          <div class="stat-value red" id="stat-suspended">0</div>
+          <div class="stat-sub">users</div>
+        </div>
+      </div>
+
+      <!-- Model Pipeline -->
+      <div class="pipeline-section">
+        <div class="pipeline-title">⚙️ Model Pipeline</div>
+        <div class="pipeline-steps">
+          <div class="step" id="pipe-input">Audio Input</div>
+          <span class="step-arrow">›</span>
+          <div class="step" id="pipe-asr">ASR / STT</div>
+          <span class="step-arrow">›</span>
+          <div class="step" id="pipe-token">Tokenize</div>
+          <span class="step-arrow">›</span>
+          <div class="step" id="pipe-model">DBRX Model</div>
+          <span class="step-arrow">›</span>
+          <div class="step" id="pipe-score">Score</div>
+          <span class="step-arrow">›</span>
+          <div class="step" id="pipe-action">Action</div>
+        </div>
+      </div>
+
+      <!-- Confidence meter -->
+      <div class="stat-card">
+        <div class="stat-label">Last Toxicity Score</div>
+        <div style="display:flex;align-items:baseline;gap:6px;margin-bottom:6px;">
+          <span class="stat-value" id="last-score-val" style="font-size:1.3rem;">—</span>
+          <span style="font-size:.75rem;color:var(--muted);" id="last-score-label">no data</span>
+        </div>
+        <div style="height:8px;background:var(--surface);border-radius:4px;overflow:hidden;">
+          <div id="last-score-bar" style="height:100%;width:0%;border-radius:4px;background:var(--green);transition:width .8s ease,background .5s;"></div>
+        </div>
+      </div>
+
+      <!-- Toxic log -->
+      <div class="toxic-log-section">
+        <div class="toxic-log-header">🚨 Flagged Messages</div>
+        <div class="toxic-log-list" id="toxic-log">
+          <div class="log-empty" id="log-empty">No toxic content detected yet</div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- Pipeline Bar (bottom) -->
+  <div id="pipeline-bar">
+    <div class="pipeline-bar-label">DATABRICKS PIPELINE</div>
+    <div class="pipeline-bar-steps">
+      <div class="pb-step" id="pb-audio"><span class="step-icon">🎙️</span> Audio Capture</div>
+      <span class="pb-arrow">→</span>
+      <div class="pb-step" id="pb-asr"><span class="step-icon">📝</span> Speech-to-Text</div>
+      <span class="pb-arrow">→</span>
+      <div class="pb-step" id="pb-embed"><span class="step-icon">🧬</span> Embedding</div>
+      <span class="pb-arrow">→</span>
+      <div class="pb-step" id="pb-infer"><span class="step-icon">🤖</span> DBRX Inference</div>
+      <span class="pb-arrow">→</span>
+      <div class="pb-step" id="pb-classify"><span class="step-icon">🏷️</span> Classification</div>
+      <span class="pb-arrow">→</span>
+      <div class="pb-step" id="pb-enforce"><span class="step-icon">🛡️</span> Enforcement</div>
+    </div>
+    <div class="progress-wrap">
+      <div class="progress-bar"><div class="progress-fill" id="progress-fill"></div></div>
+      <div class="progress-label" id="progress-label">0 analyzed</div>
+    </div>
+  </div>
+
+</div>
+
+<!-- Toast container -->
+<div id="toast-container"></div>
+
+<script>
+// ── Data ──────────────────────────────────────────────────────────────────────
+const USERS = [
+  { id: 0, name: 'Alex',   initials: 'AX', color: '#5b8af7', suspended: false },
+  { id: 1, name: 'Jordan', initials: 'JO', color: '#9b59b6', suspended: false },
+  { id: 2, name: 'Sam',    initials: 'SM', color: '#e67e22', suspended: false },
+  { id: 3, name: 'Riley',  initials: 'RI', color: '#1abc9c', suspended: false },
+  { id: 4, name: 'Taylor', initials: 'TY', color: '#e74c3c', suspended: false },
+];
+
+// Script: [userId, text, toxicityScore (0-100), delayMs before this line]
+const SCRIPT = [
+  [0, "Hey everyone, ready to start the match?",                          4,  2200],
+  [1, "Yeah! Been waiting for this all day, let's go.",                   6,  3000],
+  [3, "I've got a strategy mapped out — stick together early game.",      5,  2800],
+  [2, "Sounds good, I'll cover the flanks and watch for flankers.",       7,  3200],
+  [4, "Let's make sure we communicate better than last round.",           3,  2500],
+  [0, "Watch the left side — they're pushing hard already!",              5,  2200],
+  [1, "Got it, falling back to defend the objective.",                    4,  2400],
+  [3, "Nice positioning everyone, keep rotating.",                        6,  2600],
+  [2, "You're all completely useless — just give up and stop playing!",  91,  3500],
+  [0, "Still alive, pushing toward the mid.",                             5,  2800],
+  [1, "Great callout, following your lead.",                              4,  2500],
+  [3, "Almost there — one more push and we take the point.",              7,  2800],
+  [4, "I hate this team, every single one of you is garbage!",           88,  3200],
+  [0, "Don't let that get to you, we're doing well.",                     5,  2600],
+  [1, "Good coordination everyone, keep it up!",                          6,  2400],
+  [3, "Victory incoming — excellent teamwork this round!",                4,  3000],
+  [0, "GG everyone, great game!",                                         3,  2500],
+  [1, "That was a solid match, well played.",                             5,  2200],
+];
+
+// ── State ────────────────────────────────────────────────────────────────────
+let stats = { analyzed: 0, clean: 0, flagged: 0, suspended: 0 };
+let scriptIdx = 0;
+
+// ── Helpers ──────────────────────────────────────────────────────────────────
+function fmt_time() {
+  const d = new Date();
+  return `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}:${String(d.getSeconds()).padStart(2,'0')}`;
+}
+
+function scoreColor(score) {
+  if (score < 30)  return 'var(--green)';
+  if (score < 60)  return 'var(--yellow)';
+  return 'var(--red)';
+}
+function scoreLabel(score) {
+  if (score < 30)  return 'Clean';
+  if (score < 60)  return 'Low Risk';
+  if (score < 75)  return 'Warning';
+  return 'TOXIC';
+}
+function chipClass(score) {
+  if (score < 30)  return 'chip-clean';
+  if (score < 60)  return 'chip-warning';
+  return 'chip-toxic';
+}
+
+// ── Build user list ────────────────────────────────────────────────────────
+function buildUserList() {
+  const ul = document.getElementById('user-list');
+  ul.innerHTML = '';
+  USERS.forEach(u => {
+    const card = document.createElement('div');
+    card.className = 'user-card';
+    card.id = `user-card-${u.id}`;
+    card.innerHTML = `
+      <div class="avatar" style="background:${u.color}22;color:${u.color};border:2px solid ${u.color}44;">
+        ${u.initials}
+        <div class="speaking-ring" style="border-color:${u.color};"></div>
+      </div>
+      <div class="user-info">
+        <div class="user-name">${u.name}</div>
+        <div class="user-status" id="user-status-${u.id}">Listening</div>
+      </div>
+      <div class="mic-icon" id="mic-${u.id}">🎙️</div>
+      <div class="suspended-badge">MUTED</div>
+    `;
+    ul.appendChild(card);
+  });
+}
+
+// ── Set speaking state ────────────────────────────────────────────────────
+function setSpeaking(userId, speaking) {
+  const card = document.getElementById(`user-card-${userId}`);
+  const status = document.getElementById(`user-status-${userId}`);
+  if (!card) return;
+  card.classList.toggle('speaking', speaking);
+  status.textContent = speaking ? '🟢 Speaking…' : 'Listening';
+}
+
+// ── Suspend user ──────────────────────────────────────────────────────────
+function suspendUser(userId) {
+  const u = USERS[userId];
+  if (u.suspended) return;
+  u.suspended = true;
+  const card = document.getElementById(`user-card-${userId}`);
+  const status = document.getElementById(`user-status-${userId}`);
+  const mic = document.getElementById(`mic-${userId}`);
+  if (!card) return;
+  card.classList.remove('speaking');
+  card.classList.add('suspended');
+  status.textContent = '🔴 SUSPENDED';
+  mic.textContent = '🚫';
+  stats.suspended++;
+  document.getElementById('stat-suspended').textContent = stats.suspended;
+  showToast(`🚨 ${u.name} has been suspended from voice chat`, 'toxic');
+}
+
+// ── Pipeline animation ─────────────────────────────────────────────────────
+const PB_STEPS = ['pb-audio','pb-asr','pb-embed','pb-infer','pb-classify','pb-enforce'];
+const PIPE_STEPS = ['pipe-input','pipe-asr','pipe-token','pipe-model','pipe-score','pipe-action'];
+
+function animatePipeline(isToxic, callback) {
+  // Reset
+  PB_STEPS.forEach(id => document.getElementById(id).className = 'pb-step');
+  PIPE_STEPS.forEach(id => { const el=document.getElementById(id); el.className='step'; });
+
+  let i = 0;
+  const lastClass = isToxic ? 'flagged' : 'done';
+  function next() {
+    if (i > 0) {
+      document.getElementById(PB_STEPS[i-1]).className = `pb-step ${i===PB_STEPS.length ? lastClass : 'done'}`;
+      document.getElementById(PIPE_STEPS[i-1]).className = `step ${i===PIPE_STEPS.length ? lastClass : 'done'}`;
+    }
+    if (i < PB_STEPS.length) {
+      document.getElementById(PB_STEPS[i]).className = 'pb-step active';
+      document.getElementById(PIPE_STEPS[i]).className = 'step active';
+      i++;
+      setTimeout(next, isToxic ? 280 : 220);
+    } else {
+      // All done — mark last
+      document.getElementById(PB_STEPS[PB_STEPS.length-1]).className = `pb-step ${lastClass}`;
+      document.getElementById(PIPE_STEPS[PIPE_STEPS.length-1]).className = `step ${lastClass}`;
+      if (callback) callback();
+    }
+  }
+  next();
+}
+
+// ── Score bar ─────────────────────────────────────────────────────────────
+function updateScoreBar(score) {
+  const val   = document.getElementById('last-score-val');
+  const label = document.getElementById('last-score-label');
+  const bar   = document.getElementById('last-score-bar');
+  val.textContent   = `${score.toFixed(1)}%`;
+  label.textContent = scoreLabel(score);
+  val.style.color   = scoreColor(score);
+  bar.style.width   = `${score}%`;
+  bar.style.background = scoreColor(score);
+}
+
+// ── Toxic log ─────────────────────────────────────────────────────────────
+function addToxicLog(user, text, score) {
+  const log = document.getElementById('toxic-log');
+  const empty = document.getElementById('log-empty');
+  if (empty) empty.remove();
+  const item = document.createElement('div');
+  item.className = 'toxic-log-item';
+  item.innerHTML = `
+    <span class="log-user" style="color:${user.color}">${user.name}</span>
+    <span class="log-text" title="${text}">${text}</span>
+    <span class="log-score">${score.toFixed(0)}%</span>
+  `;
+  log.appendChild(item);
+  log.scrollTop = log.scrollHeight;
+}
+
+// ── Toast ─────────────────────────────────────────────────────────────────
+function showToast(msg, type='info') {
+  const container = document.getElementById('toast-container');
+  const t = document.createElement('div');
+  t.className = `toast toast-${type}`;
+  t.innerHTML = `<span class="toast-icon">${type==='toxic'?'🚨':'ℹ️'}</span><span>${msg}</span>`;
+  container.appendChild(t);
+  setTimeout(() => {
+    t.style.animation = 'toast-out .3s ease forwards';
+    setTimeout(() => t.remove(), 300);
+  }, 4000);
+}
+
+// ── Caption card ──────────────────────────────────────────────────────────
+function addCaption(user, text) {
+  const feed = document.getElementById('captions-feed');
+  const empty = document.getElementById('empty-state');
+  if (empty) empty.remove();
+
+  const card = document.createElement('div');
+  card.className = 'caption-card';
+  card.id = `caption-${Date.now()}`;
+  card.innerHTML = `
+    <div class="caption-meta">
+      <div class="caption-avatar" style="background:${user.color}22;color:${user.color};">${user.initials}</div>
+      <span class="caption-speaker" style="color:${user.color};">${user.name}</span>
+      <span class="caption-time">${fmt_time()}</span>
+    </div>
+    <div class="caption-text">${text}</div>
+    <div class="ai-analysis">
+      <span class="ai-label">Databricks AI:</span>
+      <span class="analysis-chip chip-analyzing" id="chip-${card.id}">
+        <div class="spinner"></div> Analyzing…
+      </span>
+      <div class="confidence-bar" style="display:none;" id="bar-wrap-${card.id}">
+        <div class="confidence-fill" id="bar-${card.id}" style="width:0%;"></div>
+      </div>
+    </div>
+  `;
+  feed.appendChild(card);
+  feed.scrollTop = feed.scrollHeight;
+  return card;
+}
+
+function resolveCaption(card, score, user, text) {
+  const chipId = `chip-${card.id}`;
+  const chip = document.getElementById(chipId);
+  const barWrap = document.getElementById(`bar-wrap-${card.id}`);
+  const bar = document.getElementById(`bar-${card.id}`);
+  const isToxic = score >= 75;
+  const isWarning = score >= 30 && score < 75;
+
+  chip.className = `analysis-chip ${chipClass(score)}`;
+  chip.innerHTML = `${isToxic ? '🚨' : isWarning ? '⚠️' : '✅'} ${scoreLabel(score)} — ${score.toFixed(1)}%`;
+
+  barWrap.style.display = 'block';
+  setTimeout(() => {
+    bar.style.width = `${score}%`;
+    bar.style.background = scoreColor(score);
+  }, 50);
+
+  if (isToxic) {
+    card.classList.add('toxic-card');
+    const notice = document.createElement('div');
+    notice.className = 'suspend-notice';
+    notice.innerHTML = `🔇 Microphone access revoked — policy violation detected`;
+    card.appendChild(notice);
+  } else if (isWarning) {
+    card.classList.add('warning-card');
+  }
+
+  // stats
+  stats.analyzed++;
+  if (isToxic || isWarning) stats.flagged++;
+  else stats.clean++;
+  document.getElementById('stat-analyzed').textContent = stats.analyzed;
+  document.getElementById('stat-clean').textContent    = stats.clean;
+  document.getElementById('stat-flagged').textContent  = stats.flagged;
+
+  // progress
+  const total = SCRIPT.length;
+  const pct = Math.round((stats.analyzed / total) * 100);
+  document.getElementById('progress-fill').style.width = pct + '%';
+  document.getElementById('progress-label').textContent = `${stats.analyzed} / ${total} analyzed`;
+
+  updateScoreBar(score);
+
+  if (isToxic) {
+    addToxicLog(user, text, score);
+    suspendUser(user.id);
+  }
+}
+
+// ── Main simulation loop ───────────────────────────────────────────────────
+function runNext() {
+  if (scriptIdx >= SCRIPT.length) {
+    showToast('✅ Session complete — all messages analyzed', 'info');
+    return;
+  }
+  const [userId, text, score, delay] = SCRIPT[scriptIdx++];
+  const user = USERS[userId];
+
+  setTimeout(() => {
+    // If user is suspended, skip silently and run next
+    if (user.suspended) {
+      runNext();
+      return;
+    }
+
+    // Start speaking
+    setSpeaking(userId, true);
+
+    // Simulate speaking duration based on text length
+    const speakDuration = Math.max(1200, text.length * 55);
+
+    setTimeout(() => {
+      setSpeaking(userId, false);
+
+      // Add caption
+      const card = addCaption(user, text);
+
+      // Animate pipeline then resolve
+      const analyzeDelay = 600 + Math.random() * 400;
+      animatePipeline(score >= 75, () => {
+        setTimeout(() => {
+          resolveCaption(card, score, user, text);
+          // Schedule next
+          setTimeout(runNext, 800);
+        }, analyzeDelay);
+      });
+    }, speakDuration);
+
+  }, delay);
+}
+
+// ── Boot ──────────────────────────────────────────────────────────────────
+buildUserList();
+// Small intro delay
+setTimeout(() => {
+  showToast('🎙️ Voice session started — AI moderation active', 'info');
+  setTimeout(runNext, 1200);
+}, 800);
+</script>
+</body>
+</html>
