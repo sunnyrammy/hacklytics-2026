@@ -1,18 +1,18 @@
 # hacklytics_2026
 
-## Databricks Delta Integration (Django + Databricks SQL Connector)
+Minimal Django app for Hacklytics 2026 with:
+- A Tailwind (CDN) template homepage at `/`
+- Databricks Delta access via Databricks SQL Connector endpoints at `/databricks/products/`
 
-This project keeps SQLite as the default Django database and uses the Databricks SQL Connector to run SQL directly against Databricks Delta tables.
-
-## 1) Setup
+## Run with conda
 
 ```bash
-python -m venv .venv
-source .venv/bin/activate
+conda create -n hacklytics_2026 python=3.14 -y
+conda activate hacklytics_2026
 pip install -r requirements.txt
 ```
 
-## 2) Configure environment variables
+## Configure Databricks environment variables (for Databricks endpoints)
 
 ```bash
 export DATABRICKS_SERVER_HOSTNAME="<your-server-hostname>"
@@ -22,25 +22,24 @@ export DATABRICKS_TOKEN="<your-personal-access-token>"
 
 Never commit tokens or secret values to git.
 
-## 3) Run migrations
+## Run migrations
 
 ```bash
 python manage.py migrate
 ```
 
-## 4) Run server
+## Start server
 
 ```bash
 python manage.py runserver
 ```
 
-## 5) Sync Databricks products into SQLite cache
+## Homepage
 
-```bash
-python manage.py sync_products_from_delta
-```
+Open:
+- http://127.0.0.1:8000/
 
-## 6) CRUD API examples
+## Databricks CRUD examples
 
 List products (JSON):
 
@@ -76,12 +75,12 @@ Delete product:
 curl -X DELETE http://127.0.0.1:8000/databricks/products/Widget/
 ```
 
-## 7) Databricks UI locations for credentials
+## Databricks credential locations
 
-- `DATABRICKS_SERVER_HOSTNAME` and `DATABRICKS_HTTP_PATH`:
-  - Go to your Databricks SQL Warehouse and open connection details.
-- `DATABRICKS_TOKEN`:
-  - Go to User Settings -> Developer -> Personal Access Tokens and generate a token.
+- Server Hostname + HTTP Path:
+  - Databricks SQL Warehouse -> connection details
+- Token:
+  - User Settings -> Developer -> Personal Access Tokens
 
 ## Security notes
 
