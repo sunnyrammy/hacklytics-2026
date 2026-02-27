@@ -1,4 +1,4 @@
-# Hacklytics 2026
+# Hacklytics 2026 - EchoGuard
 
 Django application for Hacklytics 2026 with:
 - Product CRUD APIs backed by Databricks SQL
